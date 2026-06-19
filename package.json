@@ -1,0 +1,21 @@
+{
+  "name": "@orange-the-world/orange-world",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Free, CC-BY 4.0 truth tables on money, prices, and the cost of living. Portal at orangethe.world.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Orange-The-World/orange-world.git"
+  },
+  "homepage": "https://orangethe.world",
+  "workspaces": [
+    "sites/world"
+  ],
+  "scripts": {
+    "dev": "cd sites/world && bun run dev",
+    "build": "cd sites/world && bun run build",
+    "lint": "cd sites/world && bun run lint",
+    "scan": "bash scripts/pre-publish-scan.sh"
+  }
+}

@@ -1,0 +1,1 @@
+{"root":["./src/main.tsx","./src/vite-env.d.ts","./src/components/BtcUsdChart.tsx","./src/components/BtcVsGoldChart.tsx","./src/components/PurchasingPowerChart.tsx","./src/lib/authClient.ts","./src/pages/Docs.tsx","./src/pages/Home.tsx","./src/pages/Signup.tsx","./src/pages/VerifyEmail.tsx"],"version":"5.9.3"}
