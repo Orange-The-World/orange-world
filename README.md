@@ -97,3 +97,17 @@ BitBooks (bookkeeping on a Bitcoin standard) and Orange Way (personal finance an
 ## Thanks
 
 To everyone who has published a primary-source rate table, a central-bank time series, or a historical price index in machine-readable form. This project is downstream of that work and would not exist without it.
+
+
+## Upstream data attribution
+
+Orange World data is derived from primary publishers including the Federal
+Reserve Economic Data (FRED), the Bank for International Settlements (BIS),
+the European Central Bank (ECB), the Bank of England, the Bank of Japan,
+the Bureau of Labor Statistics, the London Bullion Market Association
+(LBMA), Bitfinex, Coinbase, Kraken, and the central banks of Brazil,
+Australia, Switzerland, and Canada. See `methodology.md` for the full
+source list and series-construction notes.
+
+Re-use of Orange World data under CC-BY 4.0 MUST preserve attribution to
+both Orange World AND the upstream publisher of each series.

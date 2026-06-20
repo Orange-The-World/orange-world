@@ -32,3 +32,17 @@ The data is provided as-is. We do our best to ingest accurately and to flag know
 ## Code license
 
 This file covers the **data** only. The **code** in this repository is licensed under Apache 2.0; see [`LICENSE`](./LICENSE).
+
+
+## Upstream data attribution
+
+Orange World data is derived from primary publishers including the Federal
+Reserve Economic Data (FRED), the Bank for International Settlements (BIS),
+the European Central Bank (ECB), the Bank of England, the Bank of Japan,
+the Bureau of Labor Statistics, the London Bullion Market Association
+(LBMA), Bitfinex, Coinbase, Kraken, and the central banks of Brazil,
+Australia, Switzerland, and Canada. See `methodology.md` for the full
+source list and series-construction notes.
+
+Re-use of Orange World data under CC-BY 4.0 MUST preserve attribution to
+both Orange World AND the upstream publisher of each series.
