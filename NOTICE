@@ -1,0 +1,22 @@
+Orange World
+Copyright 2026 Orange-The-World contributors
+
+This product includes software developed by the Orange-The-World project
+and its contributors (https://github.com/Orange-The-World).
+
+License split
+
+The source code in this repository is distributed under the Apache
+License, Version 2.0 (see LICENSE).
+
+The truth-tables data published by Orange World is distributed under
+the Creative Commons Attribution 4.0 International License (CC-BY 4.0,
+see LICENSE-DATA.md). Re-use of Orange World data must preserve
+attribution to both Orange World AND the upstream publisher of each
+series (see methodology.md for the full source list).
+
+Third-party notices
+
+This software incorporates components from the projects listed in
+THIRD_PARTY_NOTICES.md. Each component is governed by the license
+stated in its own source distribution.
