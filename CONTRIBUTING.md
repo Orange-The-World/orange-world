@@ -79,6 +79,10 @@ supabase functions serve client-verify-email
 
 ---
 
+## Good first issues
+
+We tag beginner-friendly tickets with `good first issue`. If you're new and want to start somewhere small, open https://github.com/Orange-The-World/orange-world/labels/good%20first%20issue for the current list. If nothing's tagged yet, file an issue saying "I'd like a good first issue" and a maintainer will route you to one.
+
 ## Code style
 
 - **TypeScript** for all new code.
