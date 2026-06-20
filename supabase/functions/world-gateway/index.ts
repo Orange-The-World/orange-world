@@ -21,8 +21,55 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-// orange-world-prod (where truth data actually lives)
-const WORLD_DATA_URL = Deno.env.get("ORANGE_WORLD_PROD_URL")!;
+// orange-world-prod (where truth data actually lives).
+//
+// The upstream URL is read from env at boot and then validated against an
+// allowlist of hostnames we know the truth-data project can ever live on.
+// Without this check, a misconfigured env var could point the gateway at
+// an internal address (Postgres on localhost, internal Supabase metadata
+// service, etc.) and turn world-gateway into a server-side request
+// forwarder for any caller who can reach us with a valid API key.
+//
+// To extend the allowlist for a new self-host deployment, set
+// ORANGE_WORLD_ALLOWED_HOSTS as a comma-separated env var. The default
+// covers the two hostnames the maintainer publishes today.
+const DEFAULT_ALLOWED_WORLD_HOSTS = [
+  "orangethe.world",
+  "orange-world-prod.supabase.co",
+];
+
+function parseAllowedHosts(): ReadonlySet<string> {
+  const override = Deno.env.get("ORANGE_WORLD_ALLOWED_HOSTS");
+  const raw = (override ?? DEFAULT_ALLOWED_WORLD_HOSTS.join(","))
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
+  return new Set(raw);
+}
+
+function validateUpstreamUrl(rawUrl: string | undefined): string {
+  if (!rawUrl) {
+    throw new Error("ORANGE_WORLD_PROD_URL not configured");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error("ORANGE_WORLD_PROD_URL is not a valid URL");
+  }
+  if (parsed.protocol !== "https:") {
+    throw new Error("ORANGE_WORLD_PROD_URL must use https://");
+  }
+  const allowed = parseAllowedHosts();
+  if (!allowed.has(parsed.hostname.toLowerCase())) {
+    throw new Error(
+      "ORANGE_WORLD_PROD_URL host is not on the allowlist; refusing to proxy",
+    );
+  }
+  return parsed.origin;
+}
+
+const WORLD_DATA_URL = validateUpstreamUrl(Deno.env.get("ORANGE_WORLD_PROD_URL"));
 const WORLD_DATA_KEY = Deno.env.get("ORANGE_WORLD_PROD_SERVICE_KEY")!;
 
 const CORS = {
