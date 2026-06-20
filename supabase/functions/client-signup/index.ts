@@ -12,6 +12,40 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
+// --- per-IP rate limit (in-memory) -------------------------------------
+// Edge function instances are short-lived; this is a soft per-instance
+// throttle to slow down obvious abuse. For higher-strength limits use
+// Cloudflare Rate Limiting at the route layer.
+const RATE_LIMIT_PER_MIN = 5;
+const RATE_WINDOW_MS = 60_000;
+type RateBucket = { count: number; resetAt: number };
+const RATE_BUCKETS = new Map<string, RateBucket>();
+
+function clientIp(req: Request): string {
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) return xff.split(",")[0]!.trim();
+  return req.headers.get("cf-connecting-ip") ?? "unknown";
+}
+
+function rateLimit(req: Request): Response | null {
+  const ip = clientIp(req);
+  const now = Date.now();
+  const bucket = RATE_BUCKETS.get(ip);
+  if (!bucket || bucket.resetAt < now) {
+    RATE_BUCKETS.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    return null;
+  }
+  bucket.count++;
+  if (bucket.count > RATE_LIMIT_PER_MIN) {
+    return new Response("Too many requests. Try again later.", {
+      status: 429,
+      headers: { "Retry-After": "60" },
+    });
+  }
+  return null;
+}
+// -----------------------------------------------------------------------
+
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
@@ -42,6 +76,7 @@ function isValidEmail(email: string): boolean {
 }
 
 Deno.serve(async (req) => {
+  const rl = rateLimit(req); if (rl) return rl;
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
