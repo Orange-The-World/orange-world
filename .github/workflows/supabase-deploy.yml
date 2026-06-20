@@ -58,27 +58,14 @@ jobs:
         env:
           VITE_OW_SUPABASE_URL: ${{ steps.sb.outputs.url }}
           VITE_OW_SUPABASE_ANON_KEY: ${{ steps.sb.outputs.key }}
-
-      - name: Pick Pages + Supabase targets for this branch
+      - name: Pick Supabase target for this branch
         id: target
         run: |
           if [ "${{ github.ref_name }}" = "prod" ]; then
-            echo "project=${{ vars.CF_PAGES_PROJECT_PROD || 'orange-world-prod' }}" >> "$GITHUB_OUTPUT"
             echo "supabase_ref=${{ vars.VITE_OW_SUPABASE_PROJECT_ID_PROD }}" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.ref_name }}" = "dev" ]; then
-            echo "project=${{ vars.CF_PAGES_PROJECT_DEV || 'orange-world-dev' }}" >> "$GITHUB_OUTPUT"
             echo "supabase_ref=${{ vars.VITE_OW_SUPABASE_PROJECT_ID_DEV }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "Unknown branch ${{ github.ref_name }}, skipping deploy"
-            exit 0
           fi
-
-      - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy sites/world/dist --project-name=${{ steps.target.outputs.project }} --branch=${{ github.ref_name }} --commit-dirty=true
 
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v2
