@@ -16,6 +16,7 @@
     "dev": "cd sites/world && bun run dev",
     "build": "cd sites/world && bun run build",
     "lint": "cd sites/world && bun run lint",
-    "scan": "bash scripts/pre-publish-scan.sh"
+    "scan": "bash scripts/pre-publish-scan.sh",
+    "build:data:hardness": "bun scripts/hardness-ratio/build.ts"
   }
 }
