@@ -1,0 +1,75 @@
+{
+  "generated_at": "2026-07-09T21:41:08.868Z",
+  "series": [
+    {
+      "file": "btc-usd-daily.json",
+      "source": "ORBI",
+      "rows": 5504,
+      "distinct_dates": 5504,
+      "newest_date": "2026-06-12"
+    },
+    {
+      "file": "btc-eur-daily.json",
+      "source": "ORBI",
+      "rows": 5412,
+      "distinct_dates": 5412,
+      "newest_date": "2026-06-12"
+    },
+    {
+      "file": "btc-gbp-daily.json",
+      "source": "ORBI",
+      "rows": 5412,
+      "distinct_dates": 5412,
+      "newest_date": "2026-06-12"
+    },
+    {
+      "file": "btc-jpy-daily.json",
+      "source": "ORBI",
+      "rows": 5412,
+      "distinct_dates": 5412,
+      "newest_date": "2026-06-12"
+    },
+    {
+      "file": "xau-usd-daily.json",
+      "source": "LBMA fix",
+      "rows": 29364,
+      "distinct_dates": 14759,
+      "newest_date": "2026-05-28"
+    },
+    {
+      "file": "us-cpi-monthly.json",
+      "source": "FRED",
+      "rows": 951,
+      "distinct_dates": 951,
+      "newest_date": "2026-04-01"
+    },
+    {
+      "file": "us-cpi-core-monthly.json",
+      "source": "FRED",
+      "rows": 831,
+      "distinct_dates": 831,
+      "newest_date": "2026-04-01"
+    },
+    {
+      "file": "us-ppi-monthly.json",
+      "source": "FRED",
+      "rows": 1360,
+      "distinct_dates": 1360,
+      "newest_date": "2026-04-01"
+    },
+    {
+      "file": "btc-xau-daily.json",
+      "source": "ORBI BTC/USD ÷ LBMA XAU/USD",
+      "rows": 7561,
+      "distinct_dates": 3796,
+      "newest_date": "2026-05-28"
+    },
+    {
+      "file": "hardness-ratio-daily.json",
+      "source": null,
+      "rows": 3796,
+      "distinct_dates": 3796,
+      "newest_date": "2026-05-28"
+    }
+  ]
+}
