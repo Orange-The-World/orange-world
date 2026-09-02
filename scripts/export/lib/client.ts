@@ -48,9 +48,25 @@ export function makeClient(): SupabaseClient {
 // true for none of the tables these exporters read.
 //
 // uniqueColumn is a required argument and not a default, so a new caller cannot
-// page on a non-unique key without deciding to. Naming a column that does not
-// exist fails on the first query with a PostgREST error, which is the failure
-// mode we want: loud, immediate, and impossible to mistake for good data.
+// page on a non-unique key without deciding to. Two limits on that sentence,
+// both found in review and written down rather than left to be rediscovered:
+//
+//   1. That is a compile time rule, and nothing in this repository compiles
+//      scripts/export today. There is no tsc and no typecheck script, and lint
+//      covers only the portal. So a caller that omits the tiebreaker is caught
+//      at RUNTIME: the build callback lands in the uniqueColumn slot, is truthy,
+//      and the guard below throws on uniqueColumn.trim(). Loud, but loud in the
+//      nightly refresh rather than on the pull request that introduced it.
+//   2. The guard below rejects only an empty or whitespace string. An existing
+//      but NON UNIQUE column passed as the tiebreaker is accepted in silence and
+//      reinstates the exact skip or duplicate bug this pager exists to remove.
+//      Catching that needs schema knowledge this script does not have, so it is
+//      the caller's responsibility: pick a primary key or a unique index, not a
+//      second sort key that happens to be handy.
+//
+// Naming a column that does not exist fails on the first query with a PostgREST
+// error, which is the failure mode we want: loud, immediate, and impossible to
+// mistake for good data.
 //
 // Known limit, stated rather than implied: this makes the read reproducible over
 // UNCHANGED data. Rows inserted into the middle of the range while the pager is
