@@ -25,6 +25,9 @@ export async function exportBtcFiat(client: SupabaseClient, quote: Quote): Promi
     client,
     "exchange_rates",
     "bucket_ts",
+    // bucket_ts is not unique here, so the pager needs a tiebreaker. id is the
+    // table's uuid primary key.
+    "id",
     (q) =>
       q
         .eq("source_currency", "BTC")
