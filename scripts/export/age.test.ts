@@ -69,6 +69,7 @@ test("a monthly series frozen for months fails, unlike a change-only guard", () 
   const series: SeriesInput[] = [
     { file: "us-cpi-monthly.json", rows: 40, newest_date: "2026-04-01" },
   ];
+  // 95 days, past the 90 day monthly threshold.
   const ninetyFiveDaysLater = new Date("2026-07-05T06:00:00Z");
   const [result] = assertFresh(series, ninetyFiveDaysLater);
   expect(result.ageDays).toBe(95);
@@ -105,7 +106,10 @@ test("assertAllFresh throws naming the stale series and prints every series, pas
 test("assertAllFresh does not throw when every series is fresh", () => {
   const series: SeriesInput[] = [
     { file: "btc-usd-daily.json", rows: 100, newest_date: "2026-09-02" },
-    { file: "us-cpi-monthly.json", rows: 40, newest_date: "2026-08-20" },
+    // period_start, the first of the covered month: the only shape inflation.ts
+    // can emit. 63 days old at NOW, which is a normal healthy age for a monthly
+    // series measured from that date.
+    { file: "us-cpi-monthly.json", rows: 40, newest_date: "2026-07-01" },
   ];
   expect(() => assertAllFresh(series, NOW)).not.toThrow();
 });
@@ -122,4 +126,56 @@ test("a file with no cadence row fails rather than passing silently", () => {
   ];
   const [result] = assertFresh(series, NOW);
   expect(result.pass).toBe(false);
+});
+
+test("the monthly thresholds are 90 days, measured from period_start", () => {
+  // Pinned on purpose. The number is not arbitrary and it is not a taste
+  // question: see the arithmetic in the reason string in age.ts.
+  for (const file of ["us-cpi-monthly.json", "us-cpi-core-monthly.json", "us-ppi-monthly.json"]) {
+    expect(CADENCE[file].thresholdDays).toBe(90);
+  }
+});
+
+test("the daily thresholds stay at 4 and 5 days", () => {
+  // The daily series measure age from the observation's own UTC day, so they
+  // were never touched by the period_start error. Pinned so a future monthly
+  // change cannot sweep them along with it.
+  expect(CADENCE["btc-usd-daily.json"].thresholdDays).toBe(4);
+  expect(CADENCE["xau-usd-daily.json"].thresholdDays).toBe(5);
+});
+
+test("a HEALTHY monthly series at its worst alignment passes: the case 45 and 80 both got wrong", () => {
+  // Nothing is broken in this scenario. The month M reading stays the newest
+  // point until M+1 is released, so on the 31 + 31 month pair (July with
+  // August) a working pipeline is legitimately this old on the day before the
+  // slowest realistic release of the August figure.
+  const series: SeriesInput[] = [
+    { file: "us-cpi-monthly.json", rows: 40, newest_date: "2026-07-01" },
+  ];
+  const dayBeforeTheSlowestAugustRelease = new Date("2026-09-21T06:00:00Z");
+  const [result] = assertFresh(series, dayBeforeTheSlowestAugustRelease);
+
+  expect(result.ageDays).toBe(82);
+  expect(result.pass).toBe(true);
+
+  // And this is why the number had to move twice. Both thresholds this replaces
+  // would have called a healthy pipeline stale right here.
+  expect(result.ageDays).toBeGreaterThan(45);
+  expect(result.ageDays).toBeGreaterThan(80);
+});
+
+test("a monthly series still goes red the day it passes 90", () => {
+  // A threshold that was raised and can no longer fail is not a guard. From
+  // 2026-07-01, day 90 is 2026-09-29 and day 91 is 2026-09-30.
+  const series: SeriesInput[] = [
+    { file: "us-cpi-monthly.json", rows: 40, newest_date: "2026-07-01" },
+  ];
+
+  const [atThreshold] = assertFresh(series, new Date("2026-09-29T06:00:00Z"));
+  expect(atThreshold.ageDays).toBe(90);
+  expect(atThreshold.pass).toBe(true);
+
+  const [pastThreshold] = assertFresh(series, new Date("2026-09-30T06:00:00Z"));
+  expect(pastThreshold.ageDays).toBe(91);
+  expect(pastThreshold.pass).toBe(false);
 });
