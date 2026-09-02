@@ -83,4 +83,19 @@ jobs:
       # nightly refresh rather than on the pull request. This is what turns
       # that contract back into a compile time one.
       - name: Typecheck scripts/export
-        run: bun run typecheck:data
+        run: |
+          set -o pipefail
+          rc=0
+          bun run typecheck:data 2>&1 | tee typecheck.log || rc=$?
+          {
+            if [ "$rc" -eq 0 ]; then
+              echo "### Typecheck export scripts: PASSED"
+            else
+              echo "### Typecheck export scripts: FAILED (exit $rc)"
+            fi
+            echo
+            echo '```'
+            cat typecheck.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
