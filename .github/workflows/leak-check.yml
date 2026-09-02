@@ -1,4 +1,5 @@
 name: Leak check
+# Throwaway edit on the proof branch. Do not merge this branch.
 
 on:
   # No branches: filter here, deliberately. Filtering pull_request by BASE
