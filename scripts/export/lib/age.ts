@@ -64,21 +64,27 @@ export const CADENCE: Record<string, CadenceRule> = {
   },
   "us-cpi-monthly.json": {
     cadence: "monthly",
-    thresholdDays: 45,
+    thresholdDays: 90,
     reason:
-      "CPI is released once a month, roughly 2 to 3 weeks after the covered " +
-      "month ends. 45 days covers the slowest realistic release plus a " +
-      "week of slack.",
+      "Measured from period_start, the FIRST of the covered month, not the " +
+      "last: that is the only date inflation.ts can emit. Two things stack. " +
+      "CPI is released 2 to 3 weeks after the covered month ENDS, and the " +
+      "month M reading then stays the newest point for a whole month, until " +
+      "M+1 is released. So the worst case for a HEALTHY series is " +
+      "days(M) + days(M+1) + slowest release lag, and the worst month pairs " +
+      "are 31 + 31 (July with August, December with January): " +
+      "31 + 31 + 21 = 83 days. 90 leaves a week of slack on top of that. " +
+      "Anything below 83 goes red on a working pipeline twice a year.",
   },
   "us-cpi-core-monthly.json": {
     cadence: "monthly",
-    thresholdDays: 45,
-    reason: "Same monthly release schedule as us-cpi-monthly.json.",
+    thresholdDays: 90,
+    reason: "Same monthly release schedule as us-cpi-monthly.json, and the same 83 day worst case.",
   },
   "us-ppi-monthly.json": {
     cadence: "monthly",
-    thresholdDays: 45,
-    reason: "Same monthly release cadence as the CPI series.",
+    thresholdDays: 90,
+    reason: "Same monthly release cadence as the CPI series, and the same 83 day worst case.",
   },
   "btc-xau-daily.json": {
     cadence: "daily",
