@@ -117,6 +117,19 @@ Use the present tense.
 
 `dev` is the integration branch; `prod` is the live deployed branch. Promotions from `dev` to `prod` are done by maintainers after a green CI run plus a manual portal smoke test.
 
+### Merge approvals do not expire on a later push
+
+This repo does not automatically withdraw an approving review when a new commit lands on the same pull request. That is intentional: it avoids forcing a full re-review for small follow-up pushes like fixing a typo or updating a comment. It also means an approval can be filed against an earlier version of the branch than the one that actually gets merged.
+
+Because of that, whoever merges a pull request must follow this practice every time:
+
+1. Before merging, compare the commit that was approved against the current head of the branch.
+2. If that difference contains only comments, documentation, or lockfile changes, it is fine to merge on the existing approval.
+3. If that difference touches any executable code, do not merge on the old approval. Ask for a fresh review at the current head first.
+4. Record both the approved commit and the merged commit on the tracking issue or ticket for the change, even when they turn out to be the same commit.
+
+This keeps the review meaningful without requiring a new review for every small, harmless push.
+
 **What makes a PR mergeable:**
 
 - CI is green, including the leak-check workflow.
