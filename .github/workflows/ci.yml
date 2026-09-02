@@ -32,6 +32,13 @@ jobs:
         with:
           node-version: 24
 
+      # --frozen-lockfile enforces NOTHING here today, and is kept only because
+      # it starts enforcing the day a lockfile is committed. There is no
+      # committed lockfile to freeze against: bun.lock and bun.lockb are absent
+      # at the root and at sites/world, and .gitignore excludes neither. This
+      # job is green on dev in exactly that state, so the flag cannot fail as
+      # things stand. Do not cite it as evidence that dependency versions are
+      # pinned. They are not. See the same note in the export-tests job below.
       - name: Install dependencies
         run: cd sites/world && bun install --frozen-lockfile
 
