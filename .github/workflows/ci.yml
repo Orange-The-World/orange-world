@@ -98,4 +98,9 @@ jobs:
             cat typecheck.log
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$rc" -ne 0 ]; then
+            grep -E "error TS[0-9]+" typecheck.log | head -20 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+          fi
           exit "$rc"
