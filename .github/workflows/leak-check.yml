@@ -1,8 +1,12 @@
 name: Leak check
 
 on:
+  # No branches: filter here, deliberately. Filtering pull_request by BASE
+  # branch means a pull request stacked on a feature branch runs no leak scan
+  # at all and still reads green, which is indistinguishable from a clean scan.
+  # Every pull request gets scanned, whatever it targets.
   pull_request:
-    branches: [dev, prod]
+  # push stays filtered: we scan dev and prod, not every feature branch push.
   push:
     branches: [dev, prod]
 
