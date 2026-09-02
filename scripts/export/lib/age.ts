@@ -17,6 +17,16 @@
 // includes its own margin, with the reasoning next to the number so a future
 // reader can change one line instead of rereading this whole pipeline.
 //
+// READ THIS BEFORE ADDING OR CHANGING A THRESHOLD. Age is measured from the
+// artifact's own newest_date, and newest_date means a different thing per
+// cadence. For the daily series it is the observation's own UTC day, so the
+// threshold is just the widest expected gap plus slack. For the monthly series
+// it is period_start, the FIRST of the covered month, because that is the only
+// date inflation.ts can emit: the publication lag is measured from the END of
+// that month, and the reading then stays newest for a further whole month. A
+// threshold written as though the monthly date were a publication date is too
+// small by roughly two months and goes red on a healthy pipeline.
+//
 // Pure, like guard.ts: no database, no file system, no wall clock read
 // internally. The caller passes "now" in, so a test can freeze it.
 
