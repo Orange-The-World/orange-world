@@ -37,6 +37,10 @@ export async function exportInflationSeries(
     client,
     "inflation_rates",
     "period_start",
+    // period_start repeats across revisions of the same month, so the pager
+    // needs a tiebreaker. Without one it could drop the highest revision row at
+    // a page boundary and publish a superseded value.
+    "id",
     (q) =>
       q
         .eq("country", "US")
