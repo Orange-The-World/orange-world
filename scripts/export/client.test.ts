@@ -36,7 +36,11 @@ function fixture(): Fixture[] {
 // the ORDER BY does not separate it is free to return them in any order. This
 // one reverses the tie order on every second query, which is the worst case a
 // planner is allowed to produce and the case no fixture had ever covered.
-function fakeClient(rows: Fixture[]) {
+// maxRows models the server's OWN cap on rows per request (PostgREST's
+// db-max-rows). It is applied after the requested window, so a response can be
+// shorter than the range asked for with no error attached. Infinity by default:
+// a test has to opt in, and every test that does not is unaffected.
+function fakeClient(rows: Fixture[], maxRows = Infinity) {
   let queries = 0;
   const orderCalls: string[][] = [];
 
@@ -77,7 +81,8 @@ function fakeClient(rows: Fixture[]) {
           return 0;
         });
 
-        return resolve({ data: sorted.slice(lo, hi + 1), error: null });
+        const windowed = sorted.slice(lo, hi + 1).slice(0, maxRows);
+        return resolve({ data: windowed, error: null });
       },
     };
     return api;
@@ -142,4 +147,29 @@ test("an empty tiebreaker is refused instead of quietly paging on one column", a
   await expect(
     fetchAllRows<Fixture>(f.client, "t", "bucket_ts", "", (q) => q),
   ).rejects.toThrow(/unique tiebreaker/);
+});
+
+test("a server row cap below the page size does not truncate the export", async () => {
+  const rows = fixture();
+
+  // 400 is below the pager's 1,000 row page, so EVERY request comes back
+  // short, starting with the first one. A pager that treats a short page as
+  // the last page therefore stops after one request and returns 400 of 2,500
+  // rows. Nothing throws, the row set is internally consistent, and the
+  // exporter writes a truncated file: the right shape of answer with most of
+  // the data missing.
+  //
+  // Note the asymmetry that makes this worth a test rather than a comment. A
+  // server cap ABOVE the page size is harmless, because range() still bounds
+  // the window. A cap BELOW it is invisible, and only ever shows up as missing
+  // published data, never as a failure.
+  const f = fakeClient(rows, 400);
+
+  const got = await fetchAllRows<Fixture>(f.client, "t", "bucket_ts", "id", (q) => q);
+
+  // Complete: the cap changes how many requests it takes, not how many rows
+  // come back.
+  expect(got.length).toBe(ROW_COUNT);
+  // Exact: paging past a short page must not re-read rows it already has.
+  expect(new Set(got.map((r) => r.id)).size).toBe(ROW_COUNT);
 });

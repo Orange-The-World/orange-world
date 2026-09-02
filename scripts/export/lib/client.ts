@@ -76,6 +76,29 @@ export function makeClient(): SupabaseClient {
 //
 // The builder callback receives a fresh query each page so filters are reapplied
 // cleanly.
+//
+// TERMINATION. The loop stops on an EMPTY response, not a short one, and the
+// offset advances by the number of rows actually RECEIVED rather than by PAGE.
+// Both halves are required and neither is correct alone (OR-T1528).
+//
+// Stopping on a short page assumes the only reason a response can be short is
+// that the table ran out. PostgREST does not have to agree: it enforces its own
+// maximum rows per request (db-max-rows) on the server. If that cap is below
+// PAGE then EVERY response is short, starting with the first, so the loop stops
+// after one request and returns a fraction of the table. Nothing throws, the
+// rows that come back are internally consistent, and a count check, a newest
+// date check and a distinct date check all pass while most of the data is
+// missing. Note the asymmetry: a cap ABOVE PAGE is harmless, because range()
+// still bounds the window. A cap BELOW it is invisible, and only ever surfaces
+// as missing published data, never as a failure.
+//
+// Advancing by PAGE while terminating on empty would be WORSE than the bug it
+// replaces. With a server cap of 400, the first request returns rows 0 to 399
+// and the next would ask for row 1000 onward, silently dropping 600 rows out of
+// the middle of the range and still returning a plausible looking file.
+// Advancing by page.length is correct whatever the cap is, and is identical to
+// the old behaviour when there is no cap. The cost is one extra request per
+// table: the one that comes back empty.
 const PAGE = 1000;
 
 export async function fetchAllRows<T>(
@@ -92,7 +115,7 @@ export async function fetchAllRows<T>(
     );
   }
   const out: T[] = [];
-  for (let from = 0; ; from += PAGE) {
+  for (let from = 0; ; ) {
     // deno-lint-ignore no-explicit-any
     let q: any = client.from(table).select("*");
     q = build(q);
@@ -106,8 +129,19 @@ export async function fetchAllRows<T>(
       throw new Error(`query on ${table} failed: ${error.message}`);
     }
     const page = (data ?? []) as T[];
+    // More rows than the window asked for means range() is not being honoured
+    // at all. Advancing by page.length would then walk past rows the next
+    // request re-reads, so the pager would return overlapping pages while every
+    // count still looked plausible. Refuse rather than guess.
+    if (page.length > PAGE) {
+      throw new Error(
+        `query on ${table} returned ${page.length} rows for a ${PAGE} row window: ` +
+          `range() is not being honoured, so paging cannot be trusted`,
+      );
+    }
+    if (page.length === 0) break;
     out.push(...page);
-    if (page.length < PAGE) break;
+    from += page.length;
   }
   return out;
 }
