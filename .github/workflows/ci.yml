@@ -60,3 +60,31 @@ jobs:
       # that never executed them.
       - name: Run the export unit tests
         run: bun run test:data
+
+  export-typecheck:
+    name: Typecheck export scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      # The property this protects: fetchAllRows takes a REQUIRED uniqueColumn
+      # argument, because paging on a non unique sort key can skip or duplicate
+      # a row at a page boundary and that row lands in a published dataset.
+      # Required is a compile time rule and nothing here compiled scripts/export
+      # before this job existed, so an omitted tiebreaker was caught at runtime
+      # in the nightly refresh, not on the pull request that introduced it.
+      #
+      # Proven by watching it fail, not by watching it pass: a caller was edited
+      # to drop the argument, this job went red with TS2554, and the edit was
+      # reverted. A typecheck nobody has seen go red is not evidence of anything.
+      - name: Typecheck scripts/export
+        run: bun run typecheck:data
