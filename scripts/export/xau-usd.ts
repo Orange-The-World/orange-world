@@ -33,6 +33,7 @@ export async function exportXauUsd(client: SupabaseClient): Promise<Row[]> {
     // This exporter maps rows straight to data points with no collapse step, so
     // a row duplicated or skipped at a page boundary would land in the published
     // file. id is the tiebreaker that keeps the page order total.
+    "id",
     (q) =>
       q
         .eq("source_metal", "XAU")
