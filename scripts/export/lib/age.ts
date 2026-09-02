@@ -139,8 +139,20 @@ function daysBetween(newer: Date, older: Date): number {
 // time, and returns a pass/fail verdict per series. Never touches the
 // database, the file system, or the wall clock itself, so a test can freeze
 // "now" and hand in a fixture.
+//
+// Walks the input list first (so every existing caller that destructures
+// index 0 sees the same series in the same order as before), then walks the
+// CADENCE table and appends a failing entry for any cadence-mapped file that
+// had no matching entry in the input at all. That second pass is the point:
+// coverage.ts only summarizes files that exist on disk, so a series whose
+// export simply did not run this time never appears in `series` and a loop
+// over `series` alone can never see it missing. A cadence row with nothing
+// to match fails exactly like a zero-row or unknown-file series does, rather
+// than being silently absent from the report.
 export function assertFresh(series: SeriesInput[], now: Date): SeriesFreshness[] {
-  return series.map((s) => {
+  const seenFiles = new Set(series.map((s) => s.file));
+
+  const results = series.map((s) => {
     const rule = CADENCE[s.file];
     if (!rule) {
       // A series with no cadence row is a bug in this table, not a pass.
@@ -173,6 +185,23 @@ export function assertFresh(series: SeriesInput[], now: Date): SeriesFreshness[]
       pass: ageDays <= rule.thresholdDays,
     };
   });
+
+  for (const file of Object.keys(CADENCE)) {
+    if (seenFiles.has(file)) continue;
+    // A cadence row exists but nothing in the input names this file: the
+    // artifact was not produced at all this run (its export file is
+    // missing), not merely stale. Fail closed rather than skip it.
+    results.push({
+      file,
+      rows: 0,
+      newestDate: null,
+      ageDays: null,
+      thresholdDays: CADENCE[file].thresholdDays,
+      pass: false,
+    });
+  }
+
+  return results;
 }
 
 // A run that checked nothing must not be able to read like a run that checked
