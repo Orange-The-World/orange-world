@@ -21,7 +21,11 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          # Pinned, not `latest` (OR-T1525). With `latest`, two runs of a
+          # byte-identical tree can execute on two different Bun builds, so a
+          # job that goes green and then red tells you nothing about the tree.
+          # Bump this deliberately, in its own PR.
+          bun-version: 1.4.0
 
       - name: Setup Node 24 (for Vite crypto.hash)
         uses: actions/setup-node@v6
@@ -48,8 +52,20 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          # Pinned for the same reason as the job above, and it matters more
+          # here: OR-T1513 saw this job go red and then green on the same tree
+          # minutes apart. The five-green-runs flake control cannot measure the
+          # tests until the toolchain underneath them stops moving.
+          bun-version: 1.4.0
 
+      # Deliberately NOT --frozen-lockfile (OR-T1525). This repository has no
+      # committed lockfile: bun.lock and bun.lockb are absent at the root and
+      # at sites/world, and .gitignore does not exclude either of them. The
+      # flag would therefore enforce nothing -- the lint job above already
+      # passes with it against that same empty state -- and a flag that cannot
+      # fail is worse than no flag, because it reads as a guarantee. Committing
+      # a lockfile is a larger change than this PR is scoped for and is tracked
+      # separately.
       - name: Install dependencies
         run: bun install
 
