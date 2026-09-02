@@ -103,15 +103,47 @@ test("assertAllFresh throws naming the stale series and prints every series, pas
   expect(printed).toContain("FAIL");
 });
 
-test("assertAllFresh does not throw when every series is fresh", () => {
-  const series: SeriesInput[] = [
-    { file: "btc-usd-daily.json", rows: 100, newest_date: "2026-09-02" },
-    // period_start, the first of the covered month: the only shape inflation.ts
-    // can emit. 63 days old at NOW, which is a normal healthy age for a monthly
-    // series measured from that date.
-    { file: "us-cpi-monthly.json", rows: 40, newest_date: "2026-07-01" },
-  ];
+test("assertAllFresh does not throw when every known series is present and fresh", () => {
+  // Every cadence-mapped artifact must be present now, not just fresh: a
+  // series missing from the input entirely fails closed (see the test
+  // below). Build the fixture from CADENCE itself so a future artifact
+  // added there does not silently leave this test passing 9 of 10.
+  const dailyFresh = "2026-09-02"; // today: age 0 for every daily series.
+  // period_start, the first of the covered month: the only shape
+  // inflation.ts can emit. 63 days old at NOW, a normal healthy age.
+  const monthlyFresh = "2026-07-01";
+  const series: SeriesInput[] = Object.entries(CADENCE).map(([file, rule]) => ({
+    file,
+    rows: 100,
+    newest_date: rule.cadence === "daily" ? dailyFresh : monthlyFresh,
+  }));
+  expect(series.length).toBe(Object.keys(CADENCE).length);
   expect(() => assertAllFresh(series, NOW)).not.toThrow();
+});
+
+test("a series entirely missing from the input fails and is named, not silently skipped", () => {
+  // This is the case OR-C0748 found: coverage.ts only summarizes files that
+  // exist on disk, so an export that did not run this time never produces a
+  // SeriesInput row at all. A check that only iterates the input can never
+  // see that absence. Hand in nine of the ten known artifacts, all fresh,
+  // and confirm the tenth is still reported and still fails the run.
+  const omitted = "xau-usd-daily.json";
+  const nineOfTen: SeriesInput[] = Object.entries(CADENCE)
+    .filter(([file]) => file !== omitted)
+    .map(([file, rule]) => ({
+      file,
+      rows: 100,
+      newest_date: rule.cadence === "daily" ? "2026-09-02" : "2026-07-01",
+    }));
+  expect(nineOfTen.length).toBe(Object.keys(CADENCE).length - 1);
+
+  const results = assertFresh(nineOfTen, NOW);
+  const missing = results.find((r) => r.file === omitted);
+  expect(missing).toBeDefined();
+  expect(missing?.pass).toBe(false);
+  expect(missing?.newestDate).toBeNull();
+
+  expect(() => assertAllFresh(nineOfTen, NOW)).toThrow(new RegExp(omitted.replace(".", "\\.")));
 });
 
 test("a series with no newest date fails rather than reporting an unknown age as healthy", () => {
