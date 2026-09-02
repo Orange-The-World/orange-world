@@ -19,7 +19,12 @@
     "scan": "bash scripts/pre-publish-scan.sh",
     "build:data:hardness": "bun scripts/hardness-ratio/build.ts",
     "export:data": "bun scripts/export/run-all.ts",
-    "test:data": "bun test scripts/export"
+    "test:data": "bun test scripts/export",
+    "typecheck:data": "tsc --noEmit -p scripts/export/tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.14",
+    "typescript": "^5.6.3"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0"
