@@ -37,3 +37,26 @@ jobs:
 
       - name: Build
         run: cd sites/world && bun run build
+
+  export-tests:
+    name: Export unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      # scripts/export holds the two guards that stand between the database and
+      # a published CC-BY dataset: the coverage guard and the byte-for-byte
+      # writer check. They run in the nightly refresh job too, deliberately, but
+      # a pull request that changes them must not be reviewed against checks
+      # that never executed them.
+      - name: Run the export unit tests
+        run: bun run test:data
