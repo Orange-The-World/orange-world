@@ -32,9 +32,20 @@ jobs:
         with:
           node-version: 24
 
+      - name: Install workspace dependencies
+        # The guard tests below need no database and no credentials, but they
+        # DO need node_modules: client.test.ts imports lib/client.ts, which
+        # imports @supabase/supabase-js. Without this step that import cannot
+        # resolve and the whole test step exits 1, which is what turned this
+        # required check red on dev. The "Export unit tests" job runs the same
+        # command after this same install, which is why the identical tests
+        # passed there and failed here. If you remove this, read that job
+        # first.
+        run: bun install
+
       - name: Guard logic unit tests
-        # Pure fixtures, no database, no credentials: guard.ts and lib/age.ts
-        # are exercised directly, so this needs no install step.
+        # Pure fixtures, no database, no credentials: guard.ts, lib/age.ts and
+        # lib/client.ts are exercised directly against fakes.
         run: bun test scripts/export
 
       - name: Install dependencies
