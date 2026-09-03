@@ -8,7 +8,11 @@
 //
 // Every exporter runs its own zero-rows and coverage guard before it writes, so
 // a dead source or a truncated read aborts the run loudly instead of committing
-// a shrunken file over a good one.
+// a shrunken file over a good one. That guard cannot catch a frozen source: if
+// nothing in the database has changed, every exporter still returns the same
+// rows it returned last time, so no exporter's guard trips. The age assertion
+// below is the check that can: it fails the run when a series has gone longer
+// without a new data point than its own expected cadence allows.
 //
 // Run with:  bun scripts/export/run-all.ts
 // Requires ORANGE_WORLD_PROD_URL and ORANGE_WORLD_PROD_SERVICE_KEY in the env.
@@ -23,6 +27,7 @@ import { exportXauUsd } from "./xau-usd.ts";
 import { exportAllInflation } from "./inflation.ts";
 import { exportBtcXau } from "./btc-xau.ts";
 import { writeCoverage } from "./coverage.ts";
+import { assertAllFresh } from "./lib/age.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
@@ -51,7 +56,10 @@ async function main(): Promise<void> {
   runHardnessBuild();
 
   console.log("writing coverage sidecar");
-  writeCoverage(new Date().toISOString());
+  const coverage = writeCoverage(new Date().toISOString());
+
+  console.log("checking every series against its expected cadence");
+  assertAllFresh(coverage.series, new Date());
 
   console.log("done");
 }

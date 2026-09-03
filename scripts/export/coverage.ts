@@ -31,7 +31,7 @@ const ARTIFACTS = [
   "hardness-ratio-daily.json",
 ];
 
-type SeriesCoverage = {
+export type SeriesCoverage = {
   file: string;
   source: string | null;
   rows: number;
@@ -66,13 +66,17 @@ export function buildCoverage(generatedAt: string): {
   return { generated_at: generatedAt, series };
 }
 
-export function writeCoverage(generatedAt: string): void {
+export function writeCoverage(generatedAt: string): {
+  generated_at: string;
+  series: SeriesCoverage[];
+} {
   const dir = dataDir();
   const payload = buildCoverage(generatedAt);
   writeFileSync(join(dir, "coverage.json"), JSON.stringify(payload, null, 2));
   for (const s of payload.series) {
     console.log(`coverage ${s.file}: newest ${s.newest_date} (${s.distinct_dates} distinct dates)`);
   }
+  return payload;
 }
 
 if (import.meta.main) {

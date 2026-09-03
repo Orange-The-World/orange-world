@@ -32,6 +32,11 @@ jobs:
         with:
           node-version: 24
 
+      - name: Guard logic unit tests
+        # Pure fixtures, no database, no credentials: guard.ts and lib/age.ts
+        # are exercised directly, so this needs no install step.
+        run: bun test scripts/export
+
       - name: Install dependencies
         run: cd sites/world && bun install --frozen-lockfile
 
