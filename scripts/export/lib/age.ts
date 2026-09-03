@@ -80,21 +80,35 @@ export const CADENCE: Record<string, CadenceRule> = {
       "last: that is the only date inflation.ts can emit. Two things stack. " +
       "CPI is released 2 to 3 weeks after the covered month ENDS, and the " +
       "month M reading then stays the newest point for a whole month, until " +
-      "M+1 is released. So the worst case for a HEALTHY series is " +
-      "days(M) + days(M+1) + slowest release lag, and the worst month pairs " +
-      "are 31 + 31 (July with August, December with January): " +
-      "31 + 31 + 21 = 83 days. 90 leaves a week of slack on top of that. " +
-      "Anything below 83 goes red on a working pipeline twice a year.",
+      "M+1 is released. The age of month M's reading peaks on the day M+1 " +
+      "is released, which is days(M) + days(M+1) - 1 + release lag after " +
+      "period_start(M): the lag runs from the END of M+1, and the last day " +
+      "of M+1 is itself days(M) + days(M+1) - 1 days after the first of M. " +
+      "The worst month pairs are 31 + 31 (July with August, December with " +
+      "January): 31 + 31 - 1 + 21 = 82 days, which is the age the " +
+      "worst-alignment test in scripts/export/age.test.ts pins. 90 leaves " +
+      "eight days of slack on top of that. 82 is reached only in those two " +
+      "pairs, but every other pair except the two containing February " +
+      "reaches 81, so a threshold of 80 would go red in ten months of the " +
+      "twelve, not twice a year. " +
+      "The 21 day lag is an assumption about the source, not a bound on " +
+      "it: these series come from a republisher of the official release, " +
+      "and official releases have slipped well past three weeks after the " +
+      "covered month during past federal shutdowns. A 31 + 31 pair is " +
+      "already 61 days old before any lag is added, so a release slipping " +
+      "past 29 days puts a HEALTHY pipeline over 90, and a 35 day slip " +
+      "reaches 96. That red is a source delay, not a pipeline fault, and " +
+      "it is not a reason to raise this number.",
   },
   "us-cpi-core-monthly.json": {
     cadence: "monthly",
     thresholdDays: 90,
-    reason: "Same monthly release schedule as us-cpi-monthly.json, and the same 83 day worst case.",
+    reason: "Same monthly release schedule as us-cpi-monthly.json, and the same 82 day worst case.",
   },
   "us-ppi-monthly.json": {
     cadence: "monthly",
     thresholdDays: 90,
-    reason: "Same monthly release cadence as the CPI series, and the same 83 day worst case.",
+    reason: "Same monthly release cadence as the CPI series, and the same 82 day worst case.",
   },
   "btc-xau-daily.json": {
     cadence: "daily",
