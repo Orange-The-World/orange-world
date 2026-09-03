@@ -99,8 +99,8 @@ test("every row exactly once, and the same rows twice over unchanged data", asyn
   const rows = fixture();
   const f = fakeClient(rows);
 
-  const first = await fetchAllRows<Fixture>(f.client, "t", "bucket_ts", "id", (q) => q);
-  const second = await fetchAllRows<Fixture>(f.client, "t", "bucket_ts", "id", (q) => q);
+  const first = await fetchAllRows<Fixture>(f.client, "t", "bucket_ts", (q) => q);
+  const second = await fetchAllRows<Fixture>(f.client, "t", "bucket_ts", "id", (q) => q.gte("rate", 0));
 
   // Complete: nothing skipped.
   expect(first.length).toBe(ROW_COUNT);
