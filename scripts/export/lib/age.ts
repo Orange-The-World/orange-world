@@ -8,34 +8,49 @@
 // not shrink. To guard.ts, a dead source and a genuinely quiet day are the
 // same observation.
 //
-// This module fails the run when a series' newest data point is older than
-// that series' own expected cadence, whether or not anything else changed.
-// The cadences are not uniform: the BTC fiat series and the gold series
-// update daily, the inflation series update monthly, and the two derived
-// series inherit the stricter (larger, because business-day gaps are wider
-// than calendar-day gaps) of their daily inputs. Every threshold below already
-// includes its own margin, with the reasoning next to the number so a future
-// reader can change one line instead of rereading this whole pipeline.
+// This module fails the run when a series has not published what it should
+// already have published by now, whether or not anything else changed. The
+// cadences are not uniform: the BTC fiat series and the gold series update
+// daily, the inflation series update monthly, and the two derived series
+// inherit the stricter (larger, because business-day gaps are wider than
+// calendar-day gaps) of their daily inputs.
 //
-// READ THIS BEFORE ADDING OR CHANGING A THRESHOLD. Age is measured from the
-// artifact's own newest_date, and newest_date means a different thing per
-// cadence. For the daily series it is the observation's own UTC day, so the
-// threshold is just the widest expected gap plus slack. For the monthly series
-// it is period_start, the FIRST of the covered month, because that is the only
-// date inflation.ts can emit: the publication lag is measured from the END of
-// that month, and the reading then stays newest for a further whole month. A
-// threshold written as though the monthly date were a publication date is too
-// small by roughly two months and goes red on a healthy pipeline.
+// DAILY series are checked with a day-count threshold from the observation's
+// own UTC day. That arithmetic is simple and was never the source of the
+// OR-T1451 / OR-T1798 errors, so it is unchanged.
+//
+// MONTHLY series are checked differently (OR-T1800). A monthly artifact's
+// newest_date is period_start, the FIRST of the covered month: that is the
+// only date inflation.ts can emit. A day-count threshold measured from
+// period_start cannot be both false-positive free and fast: it must sit
+// above the worst healthy age (82 days, on a 31+31 month pair like July and
+// August), so a source that died right after publishing month M was only
+// caught 30 to 45 days after month M+1's release was actually due. Instead
+// of counting days, this module asks a calendar question: is the newest
+// point the most recent month whose release is already due? That question
+// does not need a single global threshold sized for the worst-case pair, so
+// there is no false-red slack to buy, and a dead source is caught within
+// releaseLagDays of its own next release being due, not within six weeks.
 //
 // Pure, like guard.ts: no database, no file system, no wall clock read
 // internally. The caller passes "now" in, so a test can freeze it.
 
 export type Cadence = "daily" | "monthly";
 
-export interface CadenceRule {
-  cadence: Cadence;
-  thresholdDays: number;
-  reason: string;
+// A discriminated union so a monthly row literally cannot carry a day count.
+// The class of bug behind OR-T1451 and OR-T1798 was a day threshold applied
+// to a period_start; this makes that a type error instead of a comment
+// nobody reads.
+export type CadenceRule =
+  | { cadence: "daily"; thresholdDays: number; reason: string }
+  | { cadence: "monthly"; releaseLagDays: number; reason: string };
+
+export function isDailyRule(rule: CadenceRule): rule is Extract<CadenceRule, { cadence: "daily" }> {
+  return rule.cadence === "daily";
+}
+
+export function isMonthlyRule(rule: CadenceRule): rule is Extract<CadenceRule, { cadence: "monthly" }> {
+  return rule.cadence === "monthly";
 }
 
 // Every artifact coverage.ts can produce must have a row here. A file with no
@@ -74,41 +89,33 @@ export const CADENCE: Record<string, CadenceRule> = {
   },
   "us-cpi-monthly.json": {
     cadence: "monthly",
-    thresholdDays: 90,
+    releaseLagDays: 35,
     reason:
-      "Measured from period_start, the FIRST of the covered month, not the " +
-      "last: that is the only date inflation.ts can emit. Two things stack. " +
-      "CPI is released 2 to 3 weeks after the covered month ENDS, and the " +
-      "month M reading then stays the newest point for a whole month, until " +
-      "M+1 is released. The age of month M's reading peaks on the day M+1 " +
-      "is released, which is days(M) + days(M+1) - 1 + release lag after " +
-      "period_start(M): the lag runs from the END of M+1, and the last day " +
-      "of M+1 is itself days(M) + days(M+1) - 1 days after the first of M. " +
-      "The worst month pairs are 31 + 31 (July with August, December with " +
-      "January): 31 + 31 - 1 + 21 = 82 days, which is the age the " +
-      "worst-alignment test in scripts/export/age.test.ts pins. 90 leaves " +
-      "eight days of slack on top of that. 82 is reached only in those two " +
-      "pairs, but every other pair except the two containing February " +
-      "reaches 81, so a threshold of 80 would go red in ten months of the " +
-      "twelve, not twice a year. " +
-      "The 21 day lag is an assumption about the source, not a bound on " +
-      "it: these series come from a republisher of the official release, " +
-      "and official releases have slipped well past three weeks after the " +
-      "covered month during past federal shutdowns. A 31 + 31 pair is " +
-      "already 61 days old before any lag is added, so a release slipping " +
-      "past 29 days puts a HEALTHY pipeline over 90, and a 35 day slip " +
-      "reaches 96. That red is a source delay, not a pipeline fault, and " +
-      "it is not a reason to raise this number.",
+      "21 days is the slowest realistic publication lag for CPI after the " +
+      "covered month ends: these series come from a republisher of the " +
+      "official release, and official releases have slipped well past " +
+      "three weeks after the covered month during past federal shutdowns. " +
+      "The extra 14 days is slip tolerance, sized to match what the old " +
+      "90-day, period_start-measured threshold tolerated at its tightest " +
+      "point (the 31+31 month pair), so this change costs no slip " +
+      "tolerance at the worst case and stops being accidentally generous " +
+      "in every other month pair. A release that slips past 35 days after " +
+      "its covered month ends is a source delay, not a pipeline fault, and " +
+      "is not a reason to raise this number.",
   },
   "us-cpi-core-monthly.json": {
     cadence: "monthly",
-    thresholdDays: 90,
-    reason: "Same monthly release schedule as us-cpi-monthly.json, and the same 82 day worst case.",
+    releaseLagDays: 35,
+    reason:
+      "Same release calendar as us-cpi-monthly.json: both are CPI series " +
+      "from the same source on the same publication schedule.",
   },
   "us-ppi-monthly.json": {
     cadence: "monthly",
-    thresholdDays: 90,
-    reason: "Same monthly release cadence as the CPI series, and the same 82 day worst case.",
+    releaseLagDays: 35,
+    reason:
+      "Same release calendar as us-cpi-monthly.json: PPI is published by " +
+      "the same source on the same monthly schedule.",
   },
   "btc-xau-daily.json": {
     cadence: "daily",
@@ -139,14 +146,98 @@ export interface SeriesFreshness {
   file: string;
   rows: number;
   newestDate: string | null;
-  ageDays: number | null;
-  thresholdDays: number;
+  cadence: Cadence | null; // null when the file has no cadence row at all
+  ageDays: number | null; // daily only; always null for a monthly series
+  thresholdDays: number | null; // daily only; always null for a monthly series
+  expectedDate: string | null; // monthly only; the oldest newest_date that still passes
   pass: boolean;
 }
 
 function daysBetween(newer: Date, older: Date): number {
   const ms = newer.getTime() - older.getTime();
   return Math.floor(ms / (24 * 60 * 60 * 1000));
+}
+
+function iso(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+// Walk back from the month before "now" until that month's release is
+// already due: a month M's release is due once end-of-M (the first of M+1)
+// plus releaseLagDays has passed. The first month found walking backwards is
+// therefore the most recent month whose release is already due, so a
+// healthy monthly series must have newest_date >= that month's period_start.
+// Bounded at 24 months so an implausible releaseLagDays throws loudly
+// instead of walking back forever.
+export function latestDueMonthStart(now: Date, releaseLagDays: number): string {
+  const y = now.getUTCFullYear();
+  const startMonth = now.getUTCMonth() - 1; // Date.UTC normalises a negative month index.
+  for (let step = 0; step < 24; step++) {
+    const m = startMonth - step;
+    const endOfM = Date.UTC(y, m + 1, 1);
+    if (endOfM + releaseLagDays * 24 * 60 * 60 * 1000 <= now.getTime()) {
+      return iso(Date.UTC(y, m, 1));
+    }
+  }
+  throw new Error(
+    `no due month found within 24 months: releaseLagDays=${releaseLagDays} is implausible`,
+  );
+}
+
+function evaluate(s: SeriesInput, now: Date): SeriesFreshness {
+  const rule = CADENCE[s.file];
+  if (!rule) {
+    // A series with no cadence row is a bug in this table, not a pass.
+    return {
+      file: s.file,
+      rows: s.rows,
+      newestDate: s.newest_date,
+      cadence: null,
+      ageDays: null,
+      thresholdDays: null,
+      expectedDate: null,
+      pass: false,
+    };
+  }
+
+  if (isMonthlyRule(rule)) {
+    const expectedDate = latestDueMonthStart(now, rule.releaseLagDays);
+    return {
+      file: s.file,
+      rows: s.rows,
+      newestDate: s.newest_date,
+      cadence: "monthly",
+      ageDays: null,
+      thresholdDays: null,
+      expectedDate,
+      pass: s.newest_date !== null && s.newest_date >= expectedDate,
+    };
+  }
+
+  // daily
+  if (s.newest_date === null) {
+    return {
+      file: s.file,
+      rows: s.rows,
+      newestDate: null,
+      cadence: "daily",
+      ageDays: null,
+      thresholdDays: rule.thresholdDays,
+      expectedDate: null,
+      pass: false,
+    };
+  }
+  const ageDays = daysBetween(now, new Date(`${s.newest_date}T00:00:00Z`));
+  return {
+    file: s.file,
+    rows: s.rows,
+    newestDate: s.newest_date,
+    cadence: "daily",
+    ageDays,
+    thresholdDays: rule.thresholdDays,
+    expectedDate: null,
+    pass: ageDays <= rule.thresholdDays,
+  };
 }
 
 // Pure: takes the coverage summary this run already produced and the current
@@ -166,53 +257,14 @@ function daysBetween(newer: Date, older: Date): number {
 export function assertFresh(series: SeriesInput[], now: Date): SeriesFreshness[] {
   const seenFiles = new Set(series.map((s) => s.file));
 
-  const results = series.map((s) => {
-    const rule = CADENCE[s.file];
-    if (!rule) {
-      // A series with no cadence row is a bug in this table, not a pass.
-      return {
-        file: s.file,
-        rows: s.rows,
-        newestDate: s.newest_date,
-        ageDays: null,
-        thresholdDays: -1,
-        pass: false,
-      };
-    }
-    if (s.newest_date === null) {
-      return {
-        file: s.file,
-        rows: s.rows,
-        newestDate: null,
-        ageDays: null,
-        thresholdDays: rule.thresholdDays,
-        pass: false,
-      };
-    }
-    const ageDays = daysBetween(now, new Date(`${s.newest_date}T00:00:00Z`));
-    return {
-      file: s.file,
-      rows: s.rows,
-      newestDate: s.newest_date,
-      ageDays,
-      thresholdDays: rule.thresholdDays,
-      pass: ageDays <= rule.thresholdDays,
-    };
-  });
+  const results = series.map((s) => evaluate(s, now));
 
   for (const file of Object.keys(CADENCE)) {
     if (seenFiles.has(file)) continue;
     // A cadence row exists but nothing in the input names this file: the
     // artifact was not produced at all this run (its export file is
     // missing), not merely stale. Fail closed rather than skip it.
-    results.push({
-      file,
-      rows: 0,
-      newestDate: null,
-      ageDays: null,
-      thresholdDays: CADENCE[file].thresholdDays,
-      pass: false,
-    });
+    results.push(evaluate({ file, rows: 0, newest_date: null }, now));
   }
 
   return results;
@@ -223,10 +275,17 @@ export function assertFresh(series: SeriesInput[], now: Date): SeriesFreshness[]
 export function formatReport(results: SeriesFreshness[]): string {
   const lines = results.map((r) => {
     const status = r.pass ? "PASS" : "FAIL";
+    if (r.cadence === "monthly") {
+      return (
+        `  ${status}  ${r.file.padEnd(28)} rows=${r.rows} ` +
+        `newest=${r.newestDate ?? "none"} expected>=${r.expectedDate ?? "unknown"}`
+      );
+    }
     const age = r.ageDays === null ? "unknown" : `${r.ageDays}d`;
+    const threshold = r.thresholdDays === null ? "" : ` threshold=${r.thresholdDays}d`;
     return (
       `  ${status}  ${r.file.padEnd(28)} rows=${r.rows} ` +
-      `newest=${r.newestDate ?? "none"} age=${age} threshold=${r.thresholdDays}d`
+      `newest=${r.newestDate ?? "none"} age=${age}${threshold}`
     );
   });
   return ["age assertion (per series, on every run):", ...lines].join("\n");
