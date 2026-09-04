@@ -26,40 +26,52 @@ concurrency:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 
 jobs:
   refresh:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout dev
+        id: checkout
         uses: actions/checkout@v7
         with:
           ref: dev
 
       - name: Setup Bun
+        id: setup-bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
       - name: Setup Node 24 (matches the portal build toolchain)
+        id: setup-node
         uses: actions/setup-node@v6
         with:
           node-version: 24
 
       - name: Install dependencies
+        id: install
         run: bun install
 
       - name: Guard logic unit tests
+        id: guard-tests
         run: bun run test:data
 
       - name: Export every artifact from the database
+        id: export
         # The export runs its own zero-rows and coverage guard per series, so a
         # dead source or a truncated read fails this step before anything is
-        # published.
+        # published. Output is captured to a file (set -o pipefail so a failure
+        # inside the pipe is not swallowed by tee) so the failure step below can
+        # attach the tail to a public issue: nobody here can otherwise read an
+        # Actions job log.
         env:
           ORANGE_WORLD_PROD_URL: ${{ secrets.ORANGE_WORLD_PROD_URL }}
           ORANGE_WORLD_PROD_SERVICE_KEY: ${{ secrets.ORANGE_WORLD_PROD_SERVICE_KEY }}
-        run: bun run export:data
+        run: |
+          set -o pipefail
+          bun run export:data 2>&1 | tee /tmp/export.log
 
       - name: Open a pull request if the data changed
         # A pull request into dev matches how everything else lands here. Note
@@ -105,4 +117,63 @@ jobs:
               --body "Automated daily refresh of the static data artifacts. Every series is regenerated from the database and the derived series are rebuilt from those fresh inputs. The coverage guard passed, so no series went backwards or lost coverage. Review the diff and merge to publish."
           else
             echo "a pull request for $BRANCH is already open"
+          fi
+
+      - name: Report failure as a GitHub issue
+        # Every seat in this org can read issues (gh_list_issues, gh_get_issue).
+        # None can read a job log. This step makes a CI failure self reporting
+        # for the whole repo instead of an outage nobody can diagnose.
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          FAILED_STEP="unknown step"
+          for pair in \
+            "Checkout dev=${{ steps.checkout.outcome }}" \
+            "Setup Bun=${{ steps.setup-bun.outcome }}" \
+            "Setup Node 24=${{ steps.setup-node.outcome }}" \
+            "Install dependencies=${{ steps.install.outcome }}" \
+            "Guard logic unit tests=${{ steps.guard-tests.outcome }}" \
+            "Export every artifact from the database=${{ steps.export.outcome }}"; do
+            name="${pair%%=*}"
+            outcome="${pair##*=}"
+            if [ "$outcome" = "failure" ]; then
+              FAILED_STEP="$name"
+              break
+            fi
+          done
+
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          TITLE="Data refresh failed: $(date -u +%Y-%m-%d)"
+
+          if [ -f /tmp/export.log ]; then
+            TAIL=$(tail -n 150 /tmp/export.log)
+          else
+            TAIL="(no export log captured; the failing step ran before or after the export step)"
+          fi
+
+          BODY_FILE=$(mktemp)
+          {
+            echo "The Data refresh workflow failed."
+            echo ""
+            echo "Failing step: $FAILED_STEP"
+            echo "Run: $RUN_URL"
+            echo ""
+            echo "Tail of the export step log:"
+            echo '```'
+            echo "$TAIL"
+            echo '```'
+          } > "$BODY_FILE"
+
+          EXISTING=$(gh issue list --state open --search "Data refresh failed in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            {
+              echo "New failing run: $RUN_URL (step: $FAILED_STEP)"
+              echo ""
+              cat "$BODY_FILE"
+            } | gh issue comment "$EXISTING" --body-file -
+          else
+            gh issue create --title "$TITLE" --body-file "$BODY_FILE"
           fi
