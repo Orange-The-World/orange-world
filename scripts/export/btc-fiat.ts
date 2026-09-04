@@ -38,8 +38,8 @@ type RateRow = {
 // written alongside the ORBI row rather than replacing it.
 //
 // The canonical published close is the ORBI Methodology's own answer to this
-// (see "Sovereign authority precedence"): consumers doing transaction
-// valuation, the default for V3/OWM/OWB, read source_authority = 'ORBI'.
+// (see "Sovereign authority precedence"): the documented default for
+// transaction valuation is source_authority = 'ORBI'.
 // Verified live: no day in any of the four pairs ever carries more than one
 // ORBI-authority row, so that filter alone is already a total order when it
 // applies.
