@@ -3,14 +3,17 @@
 // One family, four quote currencies (USD, EUR, GBP, JPY), one shape:
 //   {"pair":"BTC/USD","source":"ORBI","granularity":"1d","days":N,"data":[[date,rate],...]}
 //
-// Source table: exchange_rates. The canonical daily close for a pair is the
-// confirmed, not-superseded row at granularity 1d, product ORBI-D. One row per
-// UTC day, ordered ascending. Adding a new quote currency is one line in QUOTES.
+// Source table: exchange_rates, in the ORBI project (see lib/client.ts
+// makeOrbiClient), not the orange-world project. The candidate rows for a
+// pair are the confirmed, not-superseded rows at granularity 1d, product
+// ORBI-D. That filter is not one row per UTC day, see pickCanonicalRow below
+// for why and how one is chosen. Adding a new quote currency is one line in
+// QUOTES.
 
 import { join } from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { makeClient, fetchAllRows } from "./lib/client.ts";
+import { makeOrbiClient, fetchAllRows } from "./lib/client.ts";
 import { writeArtifact, type Row } from "./lib/writer.ts";
 import { assertHealthy, type DataRow } from "./lib/guard.ts";
 import { utcDate, readPreviousData, dataDir } from "./lib/util.ts";
@@ -18,7 +21,43 @@ import { utcDate, readPreviousData, dataDir } from "./lib/util.ts";
 export const QUOTES = ["USD", "EUR", "GBP", "JPY"] as const;
 export type Quote = (typeof QUOTES)[number];
 
-type RateRow = { bucket_ts: string; rate: number | string };
+type RateRow = {
+  id: string;
+  bucket_ts: string;
+  rate: number | string;
+  source_authority: string;
+  fetched_at: string;
+};
+
+// Two or three confirmed, not-superseded rows can share a bucket_ts on the
+// same day. Checked live against orbi-prod: this is the normal case, not an
+// edge case, for every one of the four pairs. It happens because the
+// ORBI-authority daily fixing job for a pair runs after the UTC day closes
+// (a fresh day carries only preliminary single-source rows until then), and
+// because jurisdiction-specific backfills (BANXICO, FED, BITBANK, ...) are
+// written alongside the ORBI row rather than replacing it.
+//
+// The canonical published close is the ORBI Methodology's own answer to this
+// (see "Sovereign authority precedence"): consumers doing transaction
+// valuation, the default for V3/OWM/OWB, read source_authority = 'ORBI'.
+// Verified live: no day in any of the four pairs ever carries more than one
+// ORBI-authority row, so that filter alone is already a total order when it
+// applies.
+//
+// It does not always apply: for a day this fresh, the nightly fixing job may
+// not have reached it yet, so no ORBI row exists at all. Verified live: 7
+// such days total across all four pairs, every one within the last three
+// months, every one still carrying 2+ non-ORBI candidates. For those, fall
+// back to the most recently fetched row, tied by id. That keeps the pick a
+// pure function of the row data: never of page boundaries, and never of
+// which request happened to run last.
+function pickCanonicalRow(a: RateRow, b: RateRow): RateRow {
+  const aOrbi = a.source_authority === "ORBI";
+  const bOrbi = b.source_authority === "ORBI";
+  if (aOrbi !== bOrbi) return aOrbi ? a : b;
+  if (a.fetched_at !== b.fetched_at) return a.fetched_at > b.fetched_at ? a : b;
+  return a.id > b.id ? a : b;
+}
 
 export async function exportBtcFiat(client: SupabaseClient, quote: Quote): Promise<Row[]> {
   const rows = await fetchAllRows<RateRow>(
@@ -38,12 +77,14 @@ export async function exportBtcFiat(client: SupabaseClient, quote: Quote): Promi
         .is("superseded_by_id", null),
   );
 
-  // One row per UTC day. The unique constraint on the table already guarantees
-  // this, but collapse defensively and keep the last write for a day.
-  const byDay = new Map<string, number>();
-  for (const r of rows) byDay.set(utcDate(r.bucket_ts), Number(r.rate));
+  const byDay = new Map<string, RateRow>();
+  for (const r of rows) {
+    const day = utcDate(r.bucket_ts);
+    const existing = byDay.get(day);
+    byDay.set(day, existing ? pickCanonicalRow(r, existing) : r);
+  }
 
-  const data: Row[] = [...byDay.keys()].sort().map((day) => [day, byDay.get(day)!]);
+  const data: Row[] = [...byDay.keys()].sort().map((day) => [day, Number(byDay.get(day)!.rate)]);
 
   const path = join(dataDir(), `btc-${quote.toLowerCase()}-daily.json`);
   const previous = readPreviousData(path);
@@ -67,5 +108,12 @@ export async function exportAllBtcFiat(client: SupabaseClient): Promise<void> {
 }
 
 if (import.meta.main) {
-  await exportAllBtcFiat(makeClient());
+  const orbiClient = makeOrbiClient();
+  if (!orbiClient) {
+    console.error(
+      "ORBI_PROD_URL and ORBI_PROD_SERVICE_KEY are required to run btc-fiat standalone",
+    );
+    process.exit(1);
+  }
+  await exportAllBtcFiat(orbiClient);
 }
