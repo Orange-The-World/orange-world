@@ -126,7 +126,11 @@ export async function fetchAllRows<T>(
     q = q.range(from, from + PAGE - 1);
     const { data, error } = await q;
     if (error) {
-      throw new Error(`query on ${table} failed: ${error.message}`);
+      throw new Error(
+        `query on ${table} failed: ${error.message} ` +
+          `(code=${error.code ?? "?"}, details=${error.details ?? "?"}, hint=${error.hint ?? "?"}; ` +
+          `orderColumn=${orderColumn}, uniqueColumn=${uniqueColumn}, offset=${from})`,
+      );
     }
     const page = (data ?? []) as T[];
     // More rows than the window asked for means range() is not being honoured
@@ -136,7 +140,8 @@ export async function fetchAllRows<T>(
     if (page.length > PAGE) {
       throw new Error(
         `query on ${table} returned ${page.length} rows for a ${PAGE} row window: ` +
-          `range() is not being honoured, so paging cannot be trusted`,
+          `range() is not being honoured, so paging cannot be trusted ` +
+          `(orderColumn=${orderColumn}, uniqueColumn=${uniqueColumn}, offset=${from})`,
       );
     }
     if (page.length === 0) break;
