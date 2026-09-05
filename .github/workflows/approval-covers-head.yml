@@ -1,0 +1,81 @@
+name: Approval covers head
+
+# Approvals in this repository are not dismissed when a branch is pushed to,
+# and the last pusher does not have to be approved. That is a deliberate trade:
+# a rebase or a comment fix should not cost a second review. What it costs is
+# that an approval can stay attached to a pull request while the code beneath
+# it moves, with nothing to announce it. This is that announcement.
+#
+# It reports. It does not block, and it is not a required check.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted, dismissed, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  # Nothing this workflow reports means anything until the comparison itself is
+  # shown able to go red. No network here, so it cannot be flaky and an outage
+  # cannot skip it.
+  self-test:
+    name: approval comparison self-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Prove the comparison goes red when the head has moved
+        run: node scripts/approval-covers-head.mjs --self-test
+
+  approval-covers-head:
+    name: approval covers head
+    runs-on: ubuntu-latest
+    needs: self-test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Compare the approved commit against the head commit
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -uo pipefail
+          STATUS=0
+          node scripts/approval-covers-head.mjs --check || STATUS=$?
+
+          # 0 is a pass and 1 is the finding this exists to report. Anything
+          # else means the check could not look, and "I could not look" must
+          # never be reported as "the approval covers the head".
+          if [ "${STATUS}" != "0" ] && [ "${STATUS}" != "1" ]; then
+            {
+              echo "## Approval coverage UNKNOWN"
+              echo ""
+              echo "This check did not complete (exit ${STATUS}). That is **not** a report"
+              echo "that the approval covers the head commit. Read the step log: each way of"
+              echo "failing to look has its own message."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::approval coverage could not be determined (exit ${STATUS})"
+            exit 1
+          fi
+
+          if [ "${STATUS}" = "1" ]; then
+            echo "::error::the approval on this pull request was filed on a different commit than the one that would merge. See the summary for both commits and the distance between them."
+            exit 1
+          fi
