@@ -81,44 +81,54 @@ jobs:
         # reviews the diff before merging.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Own output captured the same way the export step's is (set -o
+        # pipefail so a failure inside the pipe is not swallowed by tee), to
+        # /tmp/open-pr.log. Before this, only the export step's log was ever
+        # attached to the failure issue below: if THIS step failed (a git push
+        # rejection, a gh pr create permission error, a rate limit),
+        # /tmp/export.log still existed from the prior, successful export and
+        # the issue showed a clean unrelated run instead of the actual error.
         run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          set -o pipefail
+          {
+            set -euo pipefail
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          DATA_DIR="sites/world/public/data"
+            DATA_DIR="sites/world/public/data"
 
-          # coverage.json carries a fresh timestamp on every run, so a change
-          # limited to it is not a real refresh and must not open a PR. Decide
-          # on the price and index artifacts only.
-          CHANGED=$(git status --porcelain -- "$DATA_DIR" \
-            | awk '{ print $2 }' \
-            | grep -v '/coverage\.json$' || true)
+            # coverage.json carries a fresh timestamp on every run, so a change
+            # limited to it is not a real refresh and must not open a PR. Decide
+            # on the price and index artifacts only.
+            CHANGED=$(git status --porcelain -- "$DATA_DIR" \
+              | awk '{ print $2 }' \
+              | grep -v '/coverage\.json$' || true)
 
-          if [ -z "$CHANGED" ]; then
-            echo "no data change; nothing to publish"
-            exit 0
-          fi
+            if [ -z "$CHANGED" ]; then
+              echo "no data change; nothing to publish"
+              exit 0
+            fi
 
-          echo "changed data files:"
-          echo "$CHANGED"
+            echo "changed data files:"
+            echo "$CHANGED"
 
-          BRANCH="data-refresh/$(date -u +%Y%m%d)"
-          git checkout -b "$BRANCH"
-          git add "$DATA_DIR"
-          git commit \
-            -m "chore(data): scheduled truth-table refresh" \
-            -m "Regenerate the static series the portal charts read, straight from the database, so the published data stays current instead of drifting weeks behind. The coverage guard passed, so no series lost coverage."
-          git push --force-with-lease origin "$BRANCH"
+            BRANCH="data-refresh/$(date -u +%Y%m%d)"
+            git checkout -b "$BRANCH"
+            git add "$DATA_DIR"
+            git commit \
+              -m "chore(data): scheduled truth-table refresh" \
+              -m "Regenerate the static series the portal charts read, straight from the database, so the published data stays current instead of drifting weeks behind. The coverage guard passed, so no series lost coverage."
+            git push --force-with-lease origin "$BRANCH"
 
-          OPEN=$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')
-          if [ "$OPEN" = "0" ]; then
-            gh pr create --base dev --head "$BRANCH" \
-              --title "chore(data): scheduled truth-table refresh" \
-              --body "Automated daily refresh of the static data artifacts. Every series is regenerated from the database and the derived series are rebuilt from those fresh inputs. The coverage guard passed, so no series went backwards or lost coverage. Review the diff and merge to publish."
-          else
-            echo "a pull request for $BRANCH is already open"
-          fi
+            OPEN=$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')
+            if [ "$OPEN" = "0" ]; then
+              gh pr create --base dev --head "$BRANCH" \
+                --title "chore(data): scheduled truth-table refresh" \
+                --body "Automated daily refresh of the static data artifacts. Every series is regenerated from the database and the derived series are rebuilt from those fresh inputs. The coverage guard passed, so no series went backwards or lost coverage. Review the diff and merge to publish."
+            else
+              echo "a pull request for $BRANCH is already open"
+            fi
+          } 2>&1 | tee /tmp/open-pr.log
 
       - name: Report failure as a GitHub issue
         # Every seat in this org can read issues (gh_list_issues, gh_get_issue).
