@@ -21,12 +21,32 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          # Pinned, not `latest` (OR-T1525). With `latest`, two runs of a
+          # byte-identical tree can execute on two different Bun builds, so a
+          # job that goes green and then red tells you nothing about the tree.
+          # Bump this deliberately, in its own PR.
+          bun-version: 1.4.0
 
       - name: Setup Node 24 (for Vite crypto.hash)
         uses: actions/setup-node@v6
         with:
           node-version: 24
+
+      - name: Install workspace dependencies
+        # The guard tests below need no database and no credentials, but they
+        # DO need node_modules: client.test.ts imports lib/client.ts, which
+        # imports @supabase/supabase-js. Without this step that import cannot
+        # resolve and the whole test step exits 1, which is what turned this
+        # required check red on dev. The "Export unit tests" job runs the same
+        # command after this same install, which is why the identical tests
+        # passed there and failed here. If you remove this, read that job
+        # first.
+        run: bun install
+
+      - name: Guard logic unit tests
+        # Pure fixtures, no database, no credentials: guard.ts, lib/age.ts and
+        # lib/client.ts are exercised directly against fakes.
+        run: bun test scripts/export
 
       - name: Install dependencies
         run: cd sites/world && bun install --frozen-lockfile
@@ -37,3 +57,38 @@ jobs:
 
       - name: Build
         run: cd sites/world && bun run build
+
+  export-tests:
+    name: Export unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          # Pinned for the same reason as the job above, and it matters more
+          # here: OR-T1513 saw this job go red and then green on the same tree
+          # minutes apart. The five-green-runs flake control cannot measure the
+          # tests until the toolchain underneath them stops moving.
+          bun-version: 1.4.0
+
+      # Deliberately NOT --frozen-lockfile (OR-T1525). This repository has no
+      # committed lockfile: bun.lock and bun.lockb are absent at the root and
+      # at sites/world, and .gitignore does not exclude either of them. The
+      # flag would therefore enforce nothing -- the lint job above already
+      # passes with it against that same empty state -- and a flag that cannot
+      # fail is worse than no flag, because it reads as a guarantee. Committing
+      # a lockfile is a larger change than this PR is scoped for and is tracked
+      # separately.
+      - name: Install dependencies
+        run: bun install
+
+      # scripts/export holds the two guards that stand between the database and
+      # a published CC-BY dataset: the coverage guard and the byte-for-byte
+      # writer check. They run in the nightly refresh job too, deliberately, but
+      # a pull request that changes them must not be reviewed against checks
+      # that never executed them.
+      - name: Run the export unit tests
+        run: bun run test:data

@@ -16,6 +16,12 @@
     "dev": "cd sites/world && bun run dev",
     "build": "cd sites/world && bun run build",
     "lint": "cd sites/world && bun run lint",
-    "scan": "bash scripts/pre-publish-scan.sh"
+    "scan": "bash scripts/pre-publish-scan.sh",
+    "build:data:hardness": "bun scripts/hardness-ratio/build.ts",
+    "export:data": "bun scripts/export/run-all.ts",
+    "test:data": "bun test scripts/export"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
   }
 }

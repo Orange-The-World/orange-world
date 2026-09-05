@@ -4,6 +4,7 @@
 
 ### Free, CC-BY 4.0 truth tables on money, prices, and the cost of living.
 
+
 [![License: Apache 2.0 (code)](https://img.shields.io/badge/License-Apache%202.0-F7931A.svg)](./LICENSE)
 [![License: CC-BY 4.0 (data)](https://img.shields.io/badge/Data-CC--BY%204.0-F7931A.svg)](./LICENSE-DATA.md)
 [![Status: Early Development](https://img.shields.io/badge/Status-Early%20Development-yellow.svg)](#status)
