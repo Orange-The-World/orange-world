@@ -124,6 +124,18 @@ Use the present tense.
 - Clear before/after description of behavior change.
 - For new data sources: a Terms of Service note, a methodology summary, and at least one continuity check.
 
+### Merging
+
+**Whoever merges is neither the author nor the reviewer.** Three different people, or as close to that as the contributors on hand allow.
+
+An approval here is **not** dismissed when the branch is pushed to. A rebase or a comment fix should not cost a second review, so the approval stays attached while the branch keeps moving. That puts one obligation on whoever merges:
+
+1. **Compare the head commit you are about to merge against the commit the approval was filed on.** The `approval covers head` check reports this on every pull request and names both commits when they differ.
+2. **If they differ, read the difference before merging**, and say in the merge record what it was.
+3. **If that difference touches anything beyond comments and lock files, do not merge on the existing approval.** Ask for it to be filed again at the current head.
+
+A green CI run is not a substitute for this. The required checks re-run on every push, so they always test the tree that merges; what they cannot tell you is whether a human ever looked at that tree.
+
 ---
 
 ## Developer Certificate of Origin
