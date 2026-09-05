@@ -14,16 +14,38 @@
 //
 // EXIT CODES. Every way of failing to look has its own code, because a check
 // that could not look and printed OK anyway is worse than no check at all.
-//   0  the latest counting approval is on the head commit, or there is no
-//      approval yet, in which case there is nothing to be stale against
-//   1  the latest counting approval is on a different commit. Both are named.
-//   2  the self-test failed, so nothing else this script says can be trusted
-//   3  could not look: the API refused, answered 404, or returned something
-//      this cannot read
+// The finding code is deliberately NOT 1: node's own runtime also uses 1 for
+// an uncaught exception (a missing module, a syntax error) before this
+// script's own handlers get control, and sharing a code with the finding
+// would report a crash as "the approval is stale" instead of "this check
+// could not tell". 1 is left to the runtime, and the workflow treats it, and
+// every other code this file does not name, as UNKNOWN.
+//   0   the latest counting approval is on the head commit, or there is no
+//       approval yet, in which case there is nothing to be stale against
+//   20  the latest counting approval is on a different commit. Both are named.
+//   2   the self-test failed, so nothing else this script says can be trusted
+//   3   could not look: the API refused, answered 404, or returned something
+//       this cannot read
 //
 // It prints no token and reads no secret.
 
 const API_ROOT = process.env.GITHUB_API_URL || 'https://api.github.com'
+
+// Named once so nothing else in this file, or the workflow that calls this
+// script, has to know the literal number. See the EXIT CODES comment above.
+const FINDING_CODE = 20
+
+// Classifies ANY exit code this script, or a crash in front of it, could
+// produce into the three things a caller can act on. 0 is a pass. FINDING_CODE
+// is the thing this check exists to report. Everything else, including a bare
+// 1 from an uncaught exception, is unknown and must never be read as a pass
+// or as a finding.
+export function classifyExit(code) {
+  const n = Number(code)
+  if (n === 0) return 'pass'
+  if (n === FINDING_CODE) return 'finding'
+  return 'unknown'
+}
 
 function die(code, message) {
   console.error(`approval-covers-head: ${message}`)
@@ -95,7 +117,7 @@ export function verdict(headSha, approval) {
   }
   return {
     ok: false,
-    code: 1,
+    code: FINDING_CODE,
     approvedSha,
     headline: 'the approval was filed on a different commit than the one that would merge',
   }
@@ -215,7 +237,7 @@ async function check() {
   const result = verdict(headSha, approval)
 
   let distance = ''
-  if (!result.ok && result.code === 1) {
+  if (!result.ok && result.code === FINDING_CODE) {
     const compare = await getJson(`${API_ROOT}/repos/${repo}/compare/${result.approvedSha}...${headSha}`)
     distance = describeDistance(compare.error ? null : compare.value)
   }
@@ -270,7 +292,7 @@ function selfTest() {
   // THE CASE THIS EXISTS FOR: approved, then pushed to. Red, and it names both.
   const stale = [review('reviewer', 'APPROVED', OLD, '2020-01-01T00:00:00Z')]
   const staleVerdict = verdict(HEAD, latestCountingApproval(stale, 'author'))
-  expect(staleVerdict.code === 1, 'an approval on a superseded commit was reported green')
+  expect(staleVerdict.code === FINDING_CODE, 'an approval on a superseded commit was reported green')
   const rendered = render(HEAD, staleVerdict, describeDistance({ status: 'ahead', ahead_by: 3, behind_by: 0 }))
   expect(rendered.includes(OLD) && rendered.includes(HEAD), 'the red report did not name both commits')
   expect(rendered.includes('commits between them: 3'), 'the red report did not say how far apart the commits are')
@@ -308,7 +330,7 @@ function selfTest() {
     review('reviewer', 'APPROVED', OLD, '2020-01-01T00:00:00Z'),
     review('reviewer', 'COMMENTED', HEAD, '2020-01-02T00:00:00Z'),
   ]
-  expect(verdict(HEAD, latestCountingApproval(commented, 'author')).code === 1, 'a later comment was read as re-approving the head')
+  expect(verdict(HEAD, latestCountingApproval(commented, 'author')).code === FINDING_CODE, 'a later comment was read as re-approving the head')
 
   // With two reviewers the most recent counting approval is the one compared.
   const two = [
@@ -324,8 +346,19 @@ function selfTest() {
   ]
   expect(latestCountingApproval(shuffled, 'author') === null, 'the result depended on the order the reviews arrived in')
 
+  // THE UNKNOWN MAPPING, proven directly rather than only in the workflow's
+  // bash: 0 is a pass, the finding code is a finding, and every other code
+  // this file could ever produce or inherit from a crash -- 2, 3, a bare 1 --
+  // is unknown. A caller must never see a crash reported as the finding.
+  expect(classifyExit(0) === 'pass', 'exit 0 was not classified as a pass')
+  expect(classifyExit(FINDING_CODE) === 'finding', 'the finding code was not classified as a finding')
+  expect(classifyExit(1) === 'unknown', 'a bare exit 1, the code a runtime crash actually produces, was classified as a finding instead of unknown')
+  expect(classifyExit(2) === 'unknown', 'the self-test-failure code was classified as something other than unknown')
+  expect(classifyExit(3) === 'unknown', 'the could-not-look code was classified as something other than unknown')
+  expect(classifyExit('not-a-number') === 'unknown', 'a non-numeric code was not classified as unknown')
+
   console.log(
-    'self-test passed: red when the head has moved past the latest counting approval, naming both commits and the distance; green on an approval at the head and on a pull request with no approval; an author self-review, a withdrawn approval and a dismissed approval all count as no approval, and a later comment neither grants nor withdraws one',
+    'self-test passed: red when the head has moved past the latest counting approval, naming both commits and the distance; green on an approval at the head and on a pull request with no approval; an author self-review, a withdrawn approval and a dismissed approval all count as no approval, and a later comment neither grants nor withdraws one; every exit code other than pass and the finding classifies as unknown, including the bare 1 a crash actually produces',
   )
 }
 
@@ -341,7 +374,16 @@ async function main() {
     await check()
     return
   }
-  die(3, 'usage: --self-test | --check   (with GITHUB_REPOSITORY and PR_NUMBER set)')
+  if (mode === '--classify') {
+    // Reads an exit code off argv, not off this process: the workflow passes
+    // in the STATUS captured from running --check, including a code this
+    // script never chose (a bare 1 from a crash). Prints exactly one word so
+    // the workflow's shell can branch on it, and exits 0 regardless, because
+    // classifying is never itself the thing that can fail.
+    console.log(classifyExit(process.argv[3]))
+    return
+  }
+  die(3, 'usage: --self-test | --check | --classify <code>   (with GITHUB_REPOSITORY and PR_NUMBER set)')
 }
 
 main().catch((err) => {
