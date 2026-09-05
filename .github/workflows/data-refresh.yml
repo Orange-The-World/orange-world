@@ -196,10 +196,22 @@ jobs:
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           TITLE="Data refresh failed: $(date -u +%Y-%m-%d)"
 
-          if [ -f /tmp/export.log ]; then
-            TAIL=$(tail -n 150 /tmp/export.log | redact)
+          # The open-pr step only runs after export succeeds, so if IT is what
+          # failed, /tmp/export.log exists but describes a run that already
+          # succeeded, not the actual failure. Pick the log matching the step
+          # that actually failed; fall back to export.log for every other
+          # step, since that is the only log any of them can produce.
+          LOG_FILE=/tmp/export.log
+          LOG_LABEL="export"
+          if [ "$FAILED_STEP" = "Open a pull request if the data changed" ] && [ -f /tmp/open-pr.log ]; then
+            LOG_FILE=/tmp/open-pr.log
+            LOG_LABEL="open-pr"
+          fi
+
+          if [ -f "$LOG_FILE" ]; then
+            TAIL=$(tail -n 150 "$LOG_FILE" | redact)
           else
-            TAIL="(no export log captured; the failing step ran before or after the export step)"
+            TAIL="(no $LOG_LABEL log captured; the failing step ran before that log could be written)"
           fi
 
           BODY_FILE=$(mktemp)
@@ -209,7 +221,7 @@ jobs:
             echo "Failing step: $FAILED_STEP"
             echo "Run: $RUN_URL"
             echo ""
-            echo "Tail of the export step log (redacted):"
+            echo "Tail of the $LOG_LABEL step log (redacted):"
             echo '```'
             echo "$TAIL"
             echo '```'
