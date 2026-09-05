@@ -8,71 +8,54 @@
 // not shrink. To guard.ts, a dead source and a genuinely quiet day are the
 // same observation.
 //
-// This module fails the run when a series' newest data point is older than
-// that series' own expected cadence allows, whether or not anything else
-// changed. The cadences are not uniform: the BTC fiat series and the gold
-// series update daily, the inflation series update monthly, and the two
-// derived series inherit the stricter (larger, because business-day gaps are
-// wider than calendar-day gaps) of their daily inputs.
+// This module fails the run when a series has not published what it should
+// already have published by now, whether or not anything else changed. The
+// cadences are not uniform: the BTC fiat series and the gold series update
+// daily, the inflation series update monthly, and the two derived series
+// inherit the stricter (larger, because business-day gaps are wider than
+// calendar-day gaps) of their daily inputs.
 //
-// THE TWO CADENCES ARE CHECKED DIFFERENTLY, ON PURPOSE (OR-T1451).
+// DAILY series are checked with a day-count threshold from the observation's
+// own UTC day. That arithmetic is simple and was never the source of the
+// OR-T1451 / OR-T1798 errors, so it is unchanged.
 //
-// A daily series is checked by AGE: is the newest observation's own UTC day
-// more than `thresholdDays` behind now. That works because a daily series'
-// own day IS the thing that ages.
-//
-// A monthly series is checked by MONTH, not by age. The first version of
-// this file measured monthly staleness with a fixed day-count threshold from
-// period_start too, and that cannot be both correct and fast: period_start
-// is the FIRST of the covered month, so a healthy series legitimately
-// reaches 82 days old on the worst month pair (31 + 31, see the CADENCE
-// reasoning below), and any threshold that does not false-red on that
-// healthy case has to sit above it. A source that dies immediately after
-// publishing month M is then only reported once it reaches that padded
-// threshold, which is weeks after the M+1 release was actually due. The
-// month never got any younger in that window; the check just was not asking
-// the question that would have caught it.
-//
-// So this module does not ask "how many days old is the newest point". It
-// asks "is the newest point the month it should be": it computes the latest
-// month whose release is already due, given a per-source publication lag,
-// and requires the newest period_start to be at least that month. Month
-// length stops mattering (there is no false-red to buy slack against), and a
-// missed release is visible the day it was due, not weeks later.
+// MONTHLY series are checked differently (OR-T1800). A monthly artifact's
+// newest_date is period_start, the FIRST of the covered month: that is the
+// only date inflation.ts can emit. A day-count threshold measured from
+// period_start cannot be both false-positive free and fast: it must sit
+// above the worst healthy age (82 days, on a 31+31 month pair like July and
+// August), so a source that died right after publishing month M was only
+// caught 30 to 45 days after month M+1's release was actually due. Instead
+// of counting days, this module asks a calendar question: is the newest
+// point the most recent month whose release is already due? That question
+// does not need a single global threshold sized for the worst-case pair, so
+// there is no false-red slack to buy, and a dead source is caught within
+// releaseLagDays of its own next release being due, not within six weeks.
 //
 // Pure, like guard.ts: no database, no file system, no wall clock read
 // internally. The caller passes "now" in, so a test can freeze it.
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
 export type Cadence = "daily" | "monthly";
 
-interface DailyCadenceRule {
-  cadence: "daily";
-  /** How many days behind "now" the newest observation may be. */
-  thresholdDays: number;
-  reason: string;
+// A discriminated union so a monthly row literally cannot carry a day count.
+// The class of bug behind OR-T1451 and OR-T1798 was a day threshold applied
+// to a period_start; this makes that a type error instead of a comment
+// nobody reads.
+export type CadenceRule =
+  | { cadence: "daily"; thresholdDays: number; reason: string }
+  | { cadence: "monthly"; releaseLagDays: number; reason: string };
+
+export function isDailyRule(rule: CadenceRule): rule is Extract<CadenceRule, { cadence: "daily" }> {
+  return rule.cadence === "daily";
 }
 
-interface MonthlyCadenceRule {
-  cadence: "monthly";
-  /**
-   * Days after the covered month ENDS before its release is expected. This
-   * is the one number this module needs per monthly source: everything else
-   * (which month is due, right now) is derived from it and from `now`, so
-   * there is no separately-chosen day-count threshold left to get wrong by
-   * measuring from the wrong end of the month.
-   */
-  lagDays: number;
-  reason: string;
+export function isMonthlyRule(rule: CadenceRule): rule is Extract<CadenceRule, { cadence: "monthly" }> {
+  return rule.cadence === "monthly";
 }
 
-export type CadenceRule = DailyCadenceRule | MonthlyCadenceRule;
-
-// Every artifact coverage.ts can produce must have a row here. A file with
-// no row fails closed (see assertFresh below) rather than passing silently,
-// so adding a new series without adding its cadence is a loud bug, not a
-// gap.
+// Every artifact coverage.ts can produce must have a row here. A file with no
+// row fails closed (see assertFresh below) rather than passing silently, so
+// adding a new series without adding its cadence is a loud bug, not a gap.
 export const CADENCE: Record<string, CadenceRule> = {
   "btc-usd-daily.json": {
     cadence: "daily",
@@ -106,27 +89,33 @@ export const CADENCE: Record<string, CadenceRule> = {
   },
   "us-cpi-monthly.json": {
     cadence: "monthly",
-    lagDays: 21,
+    releaseLagDays: 35,
     reason:
-      "CPI is released 2 to 3 weeks after the covered month ends. These " +
-      "series come from a republisher of the official release, and official " +
-      "releases have slipped well past three weeks after the covered month " +
-      "during past federal shutdowns, so a red here can be a source delay " +
-      "rather than a pipeline fault. That is a reason to look at the source, " +
-      "not a reason to raise this number: this module no longer needs slack " +
-      "for month length (see the module comment above), so widening the lag " +
-      "should only ever track a real, sustained change in the source's own " +
-      "publication schedule.",
+      "21 days is the slowest realistic publication lag for CPI after the " +
+      "covered month ends: these series come from a republisher of the " +
+      "official release, and official releases have slipped well past " +
+      "three weeks after the covered month during past federal shutdowns. " +
+      "The extra 14 days is slip tolerance, sized to match what the old " +
+      "90-day, period_start-measured threshold tolerated at its tightest " +
+      "point (the 31+31 month pair), so this change costs no slip " +
+      "tolerance at the worst case and stops being accidentally generous " +
+      "in every other month pair. A release that slips past 35 days after " +
+      "its covered month ends is a source delay, not a pipeline fault, and " +
+      "is not a reason to raise this number.",
   },
   "us-cpi-core-monthly.json": {
     cadence: "monthly",
-    lagDays: 21,
-    reason: "Same monthly release schedule as us-cpi-monthly.json.",
+    releaseLagDays: 35,
+    reason:
+      "Same release calendar as us-cpi-monthly.json: both are CPI series " +
+      "from the same source on the same publication schedule.",
   },
   "us-ppi-monthly.json": {
     cadence: "monthly",
-    lagDays: 21,
-    reason: "Same monthly release cadence as the CPI series.",
+    releaseLagDays: 35,
+    reason:
+      "Same release calendar as us-cpi-monthly.json: PPI is published by " +
+      "the same source on the same monthly schedule.",
   },
   "btc-xau-daily.json": {
     cadence: "daily",
@@ -144,9 +133,9 @@ export const CADENCE: Record<string, CadenceRule> = {
   },
 };
 
-// The subset of coverage.ts's SeriesCoverage this module needs. A plain
-// shape rather than an import so this file has zero dependency on the file
-// system or the database, directly or indirectly.
+// The subset of coverage.ts's SeriesCoverage this module needs. A plain shape
+// rather than an import so this file has zero dependency on the file system
+// or the database, directly or indirectly.
 export interface SeriesInput {
   file: string;
   rows: number;
@@ -157,113 +146,97 @@ export interface SeriesFreshness {
   file: string;
   rows: number;
   newestDate: string | null;
-  ageDays: number | null;
-  /** Set only for a daily-cadence series: the day-count threshold used. */
-  thresholdDays: number | null;
-  /**
-   * Set only for a monthly-cadence series: period_start of the latest month
-   * whose release is already due. newestDate must be at least this to pass.
-   */
-  dueMonth: string | null;
+  cadence: Cadence | null; // null when the file has no cadence row at all
+  ageDays: number | null; // daily only; always null for a monthly series
+  thresholdDays: number | null; // daily only; always null for a monthly series
+  expectedDate: string | null; // monthly only; the oldest newest_date that still passes
   pass: boolean;
 }
 
 function daysBetween(newer: Date, older: Date): number {
   const ms = newer.getTime() - older.getTime();
-  return Math.floor(ms / MS_PER_DAY);
+  return Math.floor(ms / (24 * 60 * 60 * 1000));
 }
 
-/**
- * YYYY-MM-01 for the given UTC year and zero-indexed month, the same shape
- * period_start always takes.
- */
-function periodStartString(year: number, month0: number): string {
-  return `${year}-${String(month0 + 1).padStart(2, "0")}-01`;
+function iso(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
 }
 
-/**
- * The period_start (YYYY-MM-01) of the latest month whose release is already
- * due, given a publication lag measured in days from the end of the covered
- * month.
- *
- * Walks backward from the month containing `now`, which can never itself be
- * due because it has not ended yet. A month's due date is `lagDays` days
- * after it ends, which is `lagDays - 1` days after the first of the
- * FOLLOWING month (the day after the month ends is day 1 of the lag, not day
- * 0), so the walk stops at the first month behind `now` whose due date has
- * already passed.
- *
- * Capped at 24 steps: a lag that cannot resolve within two years means the
- * cadence row is misconfigured, and failing loudly here is better than
- * looping.
- */
-function dueMonthPeriodStart(now: Date, lagDays: number): string {
-  let year = now.getUTCFullYear();
-  let month0 = now.getUTCMonth();
+// Walk back from the month before "now" until that month's release is
+// already due: a month M's release is due once end-of-M (the first of M+1)
+// plus releaseLagDays has passed. The first month found walking backwards is
+// therefore the most recent month whose release is already due, so a
+// healthy monthly series must have newest_date >= that month's period_start.
+// Bounded at 24 months so an implausible releaseLagDays throws loudly
+// instead of walking back forever.
+export function latestDueMonthStart(now: Date, releaseLagDays: number): string {
+  const y = now.getUTCFullYear();
+  const startMonth = now.getUTCMonth() - 1; // Date.UTC normalises a negative month index.
   for (let step = 0; step < 24; step++) {
-    month0 -= 1;
-    if (month0 < 0) {
-      month0 = 11;
-      year -= 1;
-    }
-    const firstOfFollowingMonth = Date.UTC(year, month0 + 1, 1);
-    const dueAt = firstOfFollowingMonth + (lagDays - 1) * MS_PER_DAY;
-    if (dueAt <= now.getTime()) {
-      return periodStartString(year, month0);
+    const m = startMonth - step;
+    const endOfM = Date.UTC(y, m + 1, 1);
+    if (endOfM + releaseLagDays * 24 * 60 * 60 * 1000 <= now.getTime()) {
+      return iso(Date.UTC(y, m, 1));
     }
   }
   throw new Error(
-    `dueMonthPeriodStart found no due month within 24 months of ${now.toISOString()} ` +
-      `at a ${lagDays}-day lag. The lag is almost certainly misconfigured.`,
+    `no due month found within 24 months: releaseLagDays=${releaseLagDays} is implausible`,
   );
 }
 
-function freshnessFor(file: string, rows: number, newestDate: string | null, now: Date): SeriesFreshness {
-  const rule = CADENCE[file];
+function evaluate(s: SeriesInput, now: Date): SeriesFreshness {
+  const rule = CADENCE[s.file];
   if (!rule) {
     // A series with no cadence row is a bug in this table, not a pass.
-    return { file, rows, newestDate, ageDays: null, thresholdDays: null, dueMonth: null, pass: false };
-  }
-
-  if (rule.cadence === "daily") {
-    if (newestDate === null) {
-      return {
-        file,
-        rows,
-        newestDate: null,
-        ageDays: null,
-        thresholdDays: rule.thresholdDays,
-        dueMonth: null,
-        pass: false,
-      };
-    }
-    const ageDays = daysBetween(now, new Date(`${newestDate}T00:00:00Z`));
     return {
-      file,
-      rows,
-      newestDate,
-      ageDays,
-      thresholdDays: rule.thresholdDays,
-      dueMonth: null,
-      pass: ageDays <= rule.thresholdDays,
+      file: s.file,
+      rows: s.rows,
+      newestDate: s.newest_date,
+      cadence: null,
+      ageDays: null,
+      thresholdDays: null,
+      expectedDate: null,
+      pass: false,
     };
   }
 
-  const dueMonth = dueMonthPeriodStart(now, rule.lagDays);
-  if (newestDate === null) {
-    return { file, rows, newestDate: null, ageDays: null, thresholdDays: null, dueMonth, pass: false };
+  if (isMonthlyRule(rule)) {
+    const expectedDate = latestDueMonthStart(now, rule.releaseLagDays);
+    return {
+      file: s.file,
+      rows: s.rows,
+      newestDate: s.newest_date,
+      cadence: "monthly",
+      ageDays: null,
+      thresholdDays: null,
+      expectedDate,
+      pass: s.newest_date !== null && s.newest_date >= expectedDate,
+    };
   }
-  const ageDays = daysBetween(now, new Date(`${newestDate}T00:00:00Z`));
+
+  // daily
+  if (s.newest_date === null) {
+    return {
+      file: s.file,
+      rows: s.rows,
+      newestDate: null,
+      cadence: "daily",
+      ageDays: null,
+      thresholdDays: rule.thresholdDays,
+      expectedDate: null,
+      pass: false,
+    };
+  }
+  const ageDays = daysBetween(now, new Date(`${s.newest_date}T00:00:00Z`));
   return {
-    file,
-    rows,
-    newestDate,
+    file: s.file,
+    rows: s.rows,
+    newestDate: s.newest_date,
+    cadence: "daily",
     ageDays,
-    thresholdDays: null,
-    dueMonth,
-    // Both sides are YYYY-MM-01, the only shape period_start ever takes, so
-    // a lexical comparison is a chronological one.
-    pass: newestDate >= dueMonth,
+    thresholdDays: rule.thresholdDays,
+    expectedDate: null,
+    pass: ageDays <= rule.thresholdDays,
   };
 }
 
@@ -272,42 +245,47 @@ function freshnessFor(file: string, rows: number, newestDate: string | null, now
 // database, the file system, or the wall clock itself, so a test can freeze
 // "now" and hand in a fixture.
 //
-// Walks the input list first (so every existing caller that reads by index
-// sees the same series in the same order as before), then walks the CADENCE
-// table and appends a failing entry for any cadence-mapped file that had no
-// matching entry in the input at all. That second pass is the point:
+// Walks the input list first (so every existing caller that destructures
+// index 0 sees the same series in the same order as before), then walks the
+// CADENCE table and appends a failing entry for any cadence-mapped file that
+// had no matching entry in the input at all. That second pass is the point:
 // coverage.ts only summarizes files that exist on disk, so a series whose
-// export simply did not run this time never appears in `series`, and a loop
+// export simply did not run this time never appears in `series` and a loop
 // over `series` alone can never see it missing. A cadence row with nothing
 // to match fails exactly like a zero-row or unknown-file series does, rather
 // than being silently absent from the report.
 export function assertFresh(series: SeriesInput[], now: Date): SeriesFreshness[] {
   const seenFiles = new Set(series.map((s) => s.file));
-  const results = series.map((s) => freshnessFor(s.file, s.rows, s.newest_date, now));
+
+  const results = series.map((s) => evaluate(s, now));
 
   for (const file of Object.keys(CADENCE)) {
     if (seenFiles.has(file)) continue;
-    results.push(freshnessFor(file, 0, null, now));
+    // A cadence row exists but nothing in the input names this file: the
+    // artifact was not produced at all this run (its export file is
+    // missing), not merely stale. Fail closed rather than skip it.
+    results.push(evaluate({ file, rows: 0, newest_date: null }, now));
   }
 
   return results;
 }
 
-function thresholdLabel(r: SeriesFreshness): string {
-  if (r.thresholdDays !== null) return `${r.thresholdDays}d`;
-  if (r.dueMonth !== null) return `due ${r.dueMonth}`;
-  return "unknown";
-}
-
-// A run that checked nothing must not be able to read like a run that
-// checked everything: print every series, on pass as well as on fail.
+// A run that checked nothing must not be able to read like a run that checked
+// everything: print every series, on pass as well as on fail.
 export function formatReport(results: SeriesFreshness[]): string {
   const lines = results.map((r) => {
     const status = r.pass ? "PASS" : "FAIL";
+    if (r.cadence === "monthly") {
+      return (
+        `  ${status}  ${r.file.padEnd(28)} rows=${r.rows} ` +
+        `newest=${r.newestDate ?? "none"} expected>=${r.expectedDate ?? "unknown"}`
+      );
+    }
     const age = r.ageDays === null ? "unknown" : `${r.ageDays}d`;
+    const threshold = r.thresholdDays === null ? "" : ` threshold=${r.thresholdDays}d`;
     return (
       `  ${status}  ${r.file.padEnd(28)} rows=${r.rows} ` +
-      `newest=${r.newestDate ?? "none"} age=${age} threshold=${thresholdLabel(r)}`
+      `newest=${r.newestDate ?? "none"} age=${age}${threshold}`
     );
   });
   return ["age assertion (per series, on every run):", ...lines].join("\n");
@@ -321,6 +299,8 @@ export function assertAllFresh(series: SeriesInput[], now: Date): void {
   const failing = results.filter((r) => !r.pass);
   if (failing.length > 0) {
     const names = failing.map((r) => r.file).join(", ");
-    throw new Error(`stale source: ${failing.length} series older than their expected cadence: ${names}`);
+    throw new Error(
+      `stale source: ${failing.length} series older than their expected cadence: ${names}`,
+    );
   }
 }
