@@ -1,8 +1,12 @@
 name: CI
 
 on:
+  # No branches: filter here, deliberately. Filtering pull_request by BASE
+  # branch means a pull request stacked on a feature branch runs no job at all
+  # and still reads green, which is indistinguishable from passing. Every pull
+  # request gets checked, whatever it targets.
   pull_request:
-    branches: [dev, prod]
+  # push stays filtered: we build dev and prod, not every feature branch push.
   push:
     branches: [dev, prod]
 
