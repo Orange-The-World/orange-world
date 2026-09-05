@@ -28,9 +28,25 @@ jobs:
           bun-version: 1.4.0
 
       - name: Setup Node 24 (for Vite crypto.hash)
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 24
+
+      - name: Install workspace dependencies
+        # The guard tests below need no database and no credentials, but they
+        # DO need node_modules: client.test.ts imports lib/client.ts, which
+        # imports @supabase/supabase-js. Without this step that import cannot
+        # resolve and the whole test step exits 1, which is what turned this
+        # required check red on dev. The "Export unit tests" job runs the same
+        # command after this same install, which is why the identical tests
+        # passed there and failed here. If you remove this, read that job
+        # first.
+        run: bun install
+
+      - name: Guard logic unit tests
+        # Pure fixtures, no database, no credentials: guard.ts, lib/age.ts and
+        # lib/client.ts are exercised directly against fakes.
+        run: bun test scripts/export
 
       # --frozen-lockfile enforces NOTHING here today, and is kept only because
       # it starts enforcing the day a lockfile is committed. There is no
