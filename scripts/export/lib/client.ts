@@ -34,6 +34,28 @@ export function makeClient(): SupabaseClient {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
+// Returns a Supabase client pointed at the ORBI project, or null when the
+// credentials are not in the environment. Callers should degrade gracefully
+// (skip, warn, exit non-zero) rather than hard-failing the whole pipeline.
+//
+//   ORBI_PROD_URL          the ORBI Supabase project URL
+//   ORBI_PROD_SERVICE_KEY  a credential with read access to exchange_rates
+//
+// This wants to be a narrowly scoped, read only key (an anon key behind a
+// SELECT policy on exchange_rates), not the project's service role key: the
+// exporter's entire need is SELECT on one table, and a service role key
+// bypasses row level security on every table in the project. The function
+// itself needs no change to accept a narrower key, it passes whatever value
+// it is given straight to createClient. See OR-T2031.
+export function makeOrbiClient(): SupabaseClient | null {
+  const url = process.env.ORBI_PROD_URL;
+  const key = process.env.ORBI_PROD_SERVICE_KEY;
+  if (!url || url.trim() === "" || !key || key.trim() === "") {
+    return null;
+  }
+  return createClient(url, key, { auth: { persistSession: false } });
+}
+
 // PostgREST returns at most a page of rows per request, so a full series is
 // walked in fixed size windows. Read this before changing it: each window is a
 // SEPARATE query, and Postgres guarantees a total order only when the sort key
