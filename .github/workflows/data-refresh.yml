@@ -46,7 +46,7 @@ jobs:
 
       - name: Setup Node 24 (matches the portal build toolchain)
         id: setup-node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 24
 
