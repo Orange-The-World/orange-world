@@ -37,6 +37,36 @@ jobs:
       - name: Prove the comparison goes red when the head has moved
         run: node scripts/approval-covers-head.mjs --self-test
 
+      - name: Prove a real non-pass, non-finding exit classifies as unknown
+        run: |
+          set -uo pipefail
+          STATUS=0
+          node scripts/approval-covers-head.mjs || STATUS=$?
+
+          # Running the script with no mode is not a synthetic stand-in: it is
+          # the real usage-error path, and today it exits 3. If a future edit
+          # ever made that a pass (0) or the finding code, this step must fail
+          # rather than let the case silently stop being forced.
+          if [ "${STATUS}" = "0" ]; then
+            echo "::error::running with no mode was expected to fail to look; it exited 0, so this step no longer forces a real non-pass exit"
+            exit 1
+          fi
+
+          CLASS=$(node scripts/approval-covers-head.mjs --classify "${STATUS}")
+          if [ "${CLASS}" != "unknown" ]; then
+            echo "::error::exit ${STATUS} from a real no-mode run classified as '${CLASS}', not unknown; the fail-safe mapping is broken"
+            exit 1
+          fi
+
+          {
+            echo "## Approval coverage UNKNOWN (proof step)"
+            echo ""
+            echo "Running the script with no mode produced exit ${STATUS}, and this is the"
+            echo "same classifier the real check step calls, proven here against a real exit"
+            echo "code rather than a synthetic one."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "confirmed: exit ${STATUS} (no mode given) classifies as unknown, not a finding or a pass"
+
   approval-covers-head:
     name: approval covers head
     runs-on: ubuntu-latest
@@ -60,10 +90,13 @@ jobs:
           STATUS=0
           node scripts/approval-covers-head.mjs --check || STATUS=$?
 
-          # 0 is a pass and 1 is the finding this exists to report. Anything
-          # else means the check could not look, and "I could not look" must
-          # never be reported as "the approval covers the head".
-          if [ "${STATUS}" != "0" ] && [ "${STATUS}" != "1" ]; then
+          # Ask the script itself what this status means, rather than
+          # re-implementing the mapping here: one definition, not two that can
+          # drift apart. A bare 1 (a crash before the script's own handlers ran)
+          # is UNKNOWN, never the finding; only the named finding code is.
+          CLASS=$(node scripts/approval-covers-head.mjs --classify "${STATUS}")
+
+          if [ "${CLASS}" = "unknown" ]; then
             {
               echo "## Approval coverage UNKNOWN"
               echo ""
@@ -75,7 +108,7 @@ jobs:
             exit 1
           fi
 
-          if [ "${STATUS}" = "1" ]; then
+          if [ "${CLASS}" = "finding" ]; then
             echo "::error::the approval on this pull request was filed on a different commit than the one that would merge. See the summary for both commits and the distance between them."
             exit 1
           fi
