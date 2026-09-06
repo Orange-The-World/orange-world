@@ -79,46 +79,54 @@ jobs:
         # that a PR opened with GITHUB_TOKEN does not itself trigger the CI
         # workflow; the guard above is what gates the data, and a maintainer
         # reviews the diff before merging.
+        #
+        # Output is captured to its own log file (OR-T2227), the same way the
+        # export step captures its own: the failure step below reads whichever
+        # log matches the step that actually failed, so a push rejection or a
+        # gh pr create error is not reported by showing the prior, unrelated,
+        # already-successful export log.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          {
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          DATA_DIR="sites/world/public/data"
+            DATA_DIR="sites/world/public/data"
 
-          # coverage.json carries a fresh timestamp on every run, so a change
-          # limited to it is not a real refresh and must not open a PR. Decide
-          # on the price and index artifacts only.
-          CHANGED=$(git status --porcelain -- "$DATA_DIR" \
-            | awk '{ print $2 }' \
-            | grep -v '/coverage\.json$' || true)
+            # coverage.json carries a fresh timestamp on every run, so a change
+            # limited to it is not a real refresh and must not open a PR. Decide
+            # on the price and index artifacts only.
+            CHANGED=$(git status --porcelain -- "$DATA_DIR" \
+              | awk '{ print $2 }' \
+              | grep -v '/coverage\.json$' || true)
 
-          if [ -z "$CHANGED" ]; then
-            echo "no data change; nothing to publish"
-            exit 0
-          fi
+            if [ -z "$CHANGED" ]; then
+              echo "no data change; nothing to publish"
+              exit 0
+            fi
 
-          echo "changed data files:"
-          echo "$CHANGED"
+            echo "changed data files:"
+            echo "$CHANGED"
 
-          BRANCH="data-refresh/$(date -u +%Y%m%d)"
-          git checkout -b "$BRANCH"
-          git add "$DATA_DIR"
-          git commit \
-            -m "chore(data): scheduled truth-table refresh" \
-            -m "Regenerate the static series the portal charts read, straight from the database, so the published data stays current instead of drifting weeks behind. The coverage guard passed, so no series lost coverage."
-          git push --force-with-lease origin "$BRANCH"
+            BRANCH="data-refresh/$(date -u +%Y%m%d)"
+            git checkout -b "$BRANCH"
+            git add "$DATA_DIR"
+            git commit \
+              -m "chore(data): scheduled truth-table refresh" \
+              -m "Regenerate the static series the portal charts read, straight from the database, so the published data stays current instead of drifting weeks behind. The coverage guard passed, so no series lost coverage."
+            git push --force-with-lease origin "$BRANCH"
 
-          OPEN=$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')
-          if [ "$OPEN" = "0" ]; then
-            gh pr create --base dev --head "$BRANCH" \
-              --title "chore(data): scheduled truth-table refresh" \
-              --body "Automated daily refresh of the static data artifacts. Every series is regenerated from the database and the derived series are rebuilt from those fresh inputs. The coverage guard passed, so no series went backwards or lost coverage. Review the diff and merge to publish."
-          else
-            echo "a pull request for $BRANCH is already open"
-          fi
+            OPEN=$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')
+            if [ "$OPEN" = "0" ]; then
+              gh pr create --base dev --head "$BRANCH" \
+                --title "chore(data): scheduled truth-table refresh" \
+                --body "Automated daily refresh of the static data artifacts. Every series is regenerated from the database and the derived series are rebuilt from those fresh inputs. The coverage guard passed, so no series went backwards or lost coverage. Review the diff and merge to publish."
+            else
+              echo "a pull request for $BRANCH is already open"
+            fi
+          } 2>&1 | tee /tmp/open-pr.log
 
       - name: Report failure as a GitHub issue
         # Every seat in this org can read issues (gh_list_issues, gh_get_issue).
@@ -186,10 +194,21 @@ jobs:
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           TITLE="Data refresh failed: $(date -u +%Y-%m-%d)"
 
-          if [ -f /tmp/export.log ]; then
-            TAIL=$(tail -n 150 /tmp/export.log | redact)
+          if [ "$FAILED_STEP" = "Open a pull request if the data changed" ] && [ -f /tmp/open-pr.log ]; then
+            LOG_FILE=/tmp/open-pr.log
+            LOG_LABEL="open-pr step"
+          elif [ -f /tmp/export.log ]; then
+            LOG_FILE=/tmp/export.log
+            LOG_LABEL="export step"
           else
-            TAIL="(no export log captured; the failing step ran before or after the export step)"
+            LOG_FILE=""
+            LOG_LABEL=""
+          fi
+
+          if [ -n "$LOG_FILE" ]; then
+            TAIL=$(tail -n 150 "$LOG_FILE" | redact)
+          else
+            TAIL="(no log captured; the failing step ran before either logged step)"
           fi
 
           BODY_FILE=$(mktemp)
@@ -199,7 +218,7 @@ jobs:
             echo "Failing step: $FAILED_STEP"
             echo "Run: $RUN_URL"
             echo ""
-            echo "Tail of the export step log (redacted):"
+            echo "Tail of the $LOG_LABEL log (redacted):"
             echo '```'
             echo "$TAIL"
             echo '```'
