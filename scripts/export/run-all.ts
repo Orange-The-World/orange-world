@@ -16,12 +16,14 @@
 //
 // Run with:  bun scripts/export/run-all.ts
 // Requires ORANGE_WORLD_PROD_URL and ORANGE_WORLD_PROD_SERVICE_KEY in the env.
+// For the btc-fiat series, also set ORBI_PROD_URL and ORBI_PROD_SERVICE_KEY.
+// If the ORBI credentials are absent, btc-fiat is skipped and the script exits 1.
 
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { makeClient } from "./lib/client.ts";
+import { makeClient, makeOrbiClient } from "./lib/client.ts";
 import { exportAllBtcFiat } from "./btc-fiat.ts";
 import { exportXauUsd } from "./xau-usd.ts";
 import { exportAllInflation } from "./inflation.ts";
@@ -45,9 +47,19 @@ function runHardnessBuild(): void {
 
 async function main(): Promise<void> {
   const client = makeClient();
+  const orbiClient = makeOrbiClient();
+  let exitCode = 0;
 
   console.log("exporting price and index series from the database");
-  await exportAllBtcFiat(client);
+  if (orbiClient) {
+    await exportAllBtcFiat(orbiClient);
+  } else {
+    console.warn(
+      "ORBI_PROD_URL / ORBI_PROD_SERVICE_KEY not set;" +
+        " skipping btc-fiat export (add both secrets to orange-world repo to unblock)",
+    );
+    exitCode = 1;
+  }
   await exportXauUsd(client);
   await exportAllInflation(client);
 
@@ -62,6 +74,7 @@ async function main(): Promise<void> {
   assertAllFresh(coverage.series, new Date());
 
   console.log("done");
+  if (exitCode !== 0) process.exit(exitCode);
 }
 
 await main();

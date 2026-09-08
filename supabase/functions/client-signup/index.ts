@@ -22,9 +22,11 @@ type RateBucket = { count: number; resetAt: number };
 const RATE_BUCKETS = new Map<string, RateBucket>();
 
 function clientIp(req: Request): string {
+  const cfIp = req.headers.get("cf-connecting-ip");
+  if (cfIp) return cfIp;
   const xff = req.headers.get("x-forwarded-for");
   if (xff) return xff.split(",")[0]!.trim();
-  return req.headers.get("cf-connecting-ip") ?? "unknown";
+  return "unknown";
 }
 
 function rateLimit(req: Request): Response | null {

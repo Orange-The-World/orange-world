@@ -9,7 +9,15 @@
 
 import { test, expect } from "bun:test";
 
-import { assertFresh, assertAllFresh, CADENCE, type SeriesInput } from "./lib/age.ts";
+import {
+  assertFresh,
+  assertAllFresh,
+  latestDueMonthStart,
+  CADENCE,
+  isDailyRule,
+  isMonthlyRule,
+  type SeriesInput,
+} from "./lib/age.ts";
 
 const NOW = new Date("2026-09-02T06:00:00Z");
 
@@ -61,25 +69,88 @@ test("a daily series past its threshold fails: this is the RED case", () => {
   expect(result.pass).toBe(false);
 });
 
-test("a monthly series frozen for months fails, unlike a change-only guard", () => {
-  // Mirrors a real shape: a frozen source keeps returning the same rows every
-  // day, so a guard built around row-count and newest-date regression stays
-  // quiet indefinitely. This is the case that guard.ts structurally cannot
-  // catch and this module exists to cover.
+test("the daily thresholds stay at 4 and 5 days", () => {
+  // The daily series measure age from the observation's own UTC day, so they
+  // were never touched by the monthly period_start error and this rewrite
+  // does not touch them either. Pinned so a future monthly change cannot
+  // sweep them along with it.
+  const usd = CADENCE["btc-usd-daily.json"];
+  const xau = CADENCE["xau-usd-daily.json"];
+  expect(isDailyRule(usd)).toBe(true);
+  expect(isDailyRule(xau)).toBe(true);
+  if (isDailyRule(usd) && isDailyRule(xau)) {
+    expect(usd.thresholdDays).toBe(4);
+    expect(xau.thresholdDays).toBe(5);
+  }
+});
+
+test("the monthly release lag is 35 days for all three monthly artifacts", () => {
+  // 21 days of real publication lag plus 14 days of slip tolerance, sized to
+  // match what the old 90-day threshold tolerated at its worst alignment.
+  // See the reason string in age.ts for the full arithmetic.
+  for (const file of ["us-cpi-monthly.json", "us-cpi-core-monthly.json", "us-ppi-monthly.json"]) {
+    const rule = CADENCE[file];
+    expect(isMonthlyRule(rule)).toBe(true);
+    if (isMonthlyRule(rule)) {
+      expect(rule.releaseLagDays).toBe(35);
+    }
+  }
+});
+
+test("a monthly series stays fresh right up to the day before the next release is due, then fails exactly when it becomes due", () => {
+  // July's reading (period_start 2026-07-01). August's release becomes due
+  // at end-of-August (2026-09-01) plus the 35 day lag: 2026-10-06T00:00Z.
   const series: SeriesInput[] = [
-    { file: "us-cpi-monthly.json", rows: 40, newest_date: "2026-04-01" },
+    { file: "us-cpi-monthly.json", rows: 40, newest_date: "2026-07-01" },
   ];
-  // 95 days, past the 90 day monthly threshold.
-  const ninetyFiveDaysLater = new Date("2026-07-05T06:00:00Z");
-  const [result] = assertFresh(series, ninetyFiveDaysLater);
-  expect(result.ageDays).toBe(95);
-  expect(result.pass).toBe(false);
+
+  const justBeforeDue = new Date("2026-10-05T06:00:00Z");
+  const [stillFresh] = assertFresh(series, justBeforeDue);
+  expect(stillFresh.expectedDate).toBe("2026-07-01");
+  expect(stillFresh.pass).toBe(true);
+
+  const dueDay = new Date("2026-10-06T06:00:00Z");
+  const [nowStale] = assertFresh(series, dueDay);
+  expect(nowStale.expectedDate).toBe("2026-08-01");
+  expect(nowStale.pass).toBe(false);
+});
+
+test("a HEALTHY monthly series can be very old and still pass: the case the old 82/83-day arithmetic existed to cover", () => {
+  // Same fixture OR-T1451 added (July reading, worst 31+31 pair with August):
+  // 96 days old by 2026-10-05, well past the old 90-day threshold. It still
+  // passes here because pass no longer depends on age at all, only on
+  // whether the next release (August's, due 2026-10-06) has come due yet.
+  const series: SeriesInput[] = [
+    { file: "us-cpi-monthly.json", rows: 40, newest_date: "2026-07-01" },
+  ];
+  const [result] = assertFresh(series, new Date("2026-10-05T06:00:00Z"));
+  expect(result.pass).toBe(true);
+  expect(result.ageDays).toBeNull();
+  expect(result.cadence).toBe("monthly");
+});
+
+test("latestDueMonthStart needs no extra slack for a short month and costs no extra latency for a long pair", () => {
+  // February 2026 has 28 days. Its reading becomes due-for-replacement when
+  // March's release is due: end-of-March (2026-04-01) plus 35 days = 2026-05-06.
+  expect(latestDueMonthStart(new Date("2026-05-05T06:00:00Z"), 35)).toBe("2026-02-01");
+  expect(latestDueMonthStart(new Date("2026-05-06T06:00:00Z"), 35)).toBe("2026-03-01");
+});
+
+test("latestDueMonthStart normalises across a year boundary instead of resolving to a negative month", () => {
+  // As of 2026-01-05, November 2025's release (due end-of-December plus 35
+  // days = 2026-01-05T00:00Z) is the most recent one due; December's own
+  // release is not due until 2026-02-05.
+  expect(latestDueMonthStart(new Date("2026-01-05T06:00:00Z"), 35)).toBe("2025-11-01");
+});
+
+test("latestDueMonthStart throws rather than walking back forever when releaseLagDays is implausible", () => {
+  expect(() => latestDueMonthStart(new Date("2026-09-02T06:00:00Z"), 10000)).toThrow(/implausible/);
 });
 
 test("assertAllFresh throws naming the stale series and prints every series, pass and fail alike", () => {
   const series: SeriesInput[] = [
     { file: "btc-usd-daily.json", rows: 100, newest_date: "2026-09-02" }, // fresh
-    { file: "us-cpi-monthly.json", rows: 40, newest_date: "2026-04-01" }, // stale
+    { file: "us-cpi-monthly.json", rows: 40, newest_date: "2026-01-01" }, // long overdue
   ];
   const logs: string[] = [];
   const original = console.log;
@@ -110,7 +181,8 @@ test("assertAllFresh does not throw when every known series is present and fresh
   // added there does not silently leave this test passing 9 of 10.
   const dailyFresh = "2026-09-02"; // today: age 0 for every daily series.
   // period_start, the first of the covered month: the only shape
-  // inflation.ts can emit. 63 days old at NOW, a normal healthy age.
+  // inflation.ts can emit. As of NOW (2026-09-02) the most recent due month
+  // for a 35-day lag is 2026-06-01, so 2026-07-01 comfortably passes.
   const monthlyFresh = "2026-07-01";
   const series: SeriesInput[] = Object.entries(CADENCE).map(([file, rule]) => ({
     file,
@@ -158,56 +230,4 @@ test("a file with no cadence row fails rather than passing silently", () => {
   ];
   const [result] = assertFresh(series, NOW);
   expect(result.pass).toBe(false);
-});
-
-test("the monthly thresholds are 90 days, measured from period_start", () => {
-  // Pinned on purpose. The number is not arbitrary and it is not a taste
-  // question: see the arithmetic in the reason string in age.ts.
-  for (const file of ["us-cpi-monthly.json", "us-cpi-core-monthly.json", "us-ppi-monthly.json"]) {
-    expect(CADENCE[file].thresholdDays).toBe(90);
-  }
-});
-
-test("the daily thresholds stay at 4 and 5 days", () => {
-  // The daily series measure age from the observation's own UTC day, so they
-  // were never touched by the period_start error. Pinned so a future monthly
-  // change cannot sweep them along with it.
-  expect(CADENCE["btc-usd-daily.json"].thresholdDays).toBe(4);
-  expect(CADENCE["xau-usd-daily.json"].thresholdDays).toBe(5);
-});
-
-test("a HEALTHY monthly series at its worst alignment passes: the case 45 and 80 both got wrong", () => {
-  // Nothing is broken in this scenario. The month M reading stays the newest
-  // point until M+1 is released, so on the 31 + 31 month pair (July with
-  // August) a working pipeline is legitimately this old on the day before the
-  // slowest realistic release of the August figure.
-  const series: SeriesInput[] = [
-    { file: "us-cpi-monthly.json", rows: 40, newest_date: "2026-07-01" },
-  ];
-  const dayBeforeTheSlowestAugustRelease = new Date("2026-09-21T06:00:00Z");
-  const [result] = assertFresh(series, dayBeforeTheSlowestAugustRelease);
-
-  expect(result.ageDays).toBe(82);
-  expect(result.pass).toBe(true);
-
-  // And this is why the number had to move twice. Both thresholds this replaces
-  // would have called a healthy pipeline stale right here.
-  expect(result.ageDays).toBeGreaterThan(45);
-  expect(result.ageDays).toBeGreaterThan(80);
-});
-
-test("a monthly series still goes red the day it passes 90", () => {
-  // A threshold that was raised and can no longer fail is not a guard. From
-  // 2026-07-01, day 90 is 2026-09-29 and day 91 is 2026-09-30.
-  const series: SeriesInput[] = [
-    { file: "us-cpi-monthly.json", rows: 40, newest_date: "2026-07-01" },
-  ];
-
-  const [atThreshold] = assertFresh(series, new Date("2026-09-29T06:00:00Z"));
-  expect(atThreshold.ageDays).toBe(90);
-  expect(atThreshold.pass).toBe(true);
-
-  const [pastThreshold] = assertFresh(series, new Date("2026-09-30T06:00:00Z"));
-  expect(pastThreshold.ageDays).toBe(91);
-  expect(pastThreshold.pass).toBe(false);
 });

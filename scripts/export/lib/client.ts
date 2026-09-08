@@ -34,6 +34,28 @@ export function makeClient(): SupabaseClient {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
+// Returns a Supabase client pointed at the ORBI project, or null when the
+// credentials are not in the environment. Callers should degrade gracefully
+// (skip, warn, exit non-zero) rather than hard-failing the whole pipeline.
+//
+//   ORBI_PROD_URL          the ORBI Supabase project URL
+//   ORBI_PROD_SERVICE_KEY  a credential with read access to exchange_rates
+//
+// This wants to be a narrowly scoped, read only key (an anon key behind a
+// SELECT policy on exchange_rates), not the project's service role key: the
+// exporter's entire need is SELECT on one table, and a service role key
+// bypasses row level security on every table in the project. The function
+// itself needs no change to accept a narrower key, it passes whatever value
+// it is given straight to createClient. See OR-T2031.
+export function makeOrbiClient(): SupabaseClient | null {
+  const url = process.env.ORBI_PROD_URL;
+  const key = process.env.ORBI_PROD_SERVICE_KEY;
+  if (!url || url.trim() === "" || !key || key.trim() === "") {
+    return null;
+  }
+  return createClient(url, key, { auth: { persistSession: false } });
+}
+
 // PostgREST returns at most a page of rows per request, so a full series is
 // walked in fixed size windows. Read this before changing it: each window is a
 // SEPARATE query, and Postgres guarantees a total order only when the sort key
@@ -51,12 +73,13 @@ export function makeClient(): SupabaseClient {
 // page on a non-unique key without deciding to. Two limits on that sentence,
 // both found in review and written down rather than left to be rediscovered:
 //
-//   1. That is a compile time rule, and nothing in this repository compiles
-//      scripts/export today. There is no tsc and no typecheck script, and lint
-//      covers only the portal. So a caller that omits the tiebreaker is caught
-//      at RUNTIME: the build callback lands in the uniqueColumn slot, is truthy,
-//      and the guard below throws on uniqueColumn.trim(). Loud, but loud in the
-//      nightly refresh rather than on the pull request that introduced it.
+//   1. That is a compile time rule, and it is now enforced as one. The
+//      Typecheck export scripts job runs tsc over this directory on every pull
+//      request, so a caller that omits the tiebreaker fails the pull request
+//      that introduced it rather than the nightly refresh. The runtime guard
+//      below stays regardless: a maintainer can run an exporter directly with
+//      bun without ever going through CI, and the guard is also what catches a
+//      tiebreaker that is present but empty.
 //   2. The guard below rejects only an empty or whitespace string. An existing
 //      but NON UNIQUE column passed as the tiebreaker is accepted in silence and
 //      reinstates the exact skip or duplicate bug this pager exists to remove.
@@ -99,6 +122,19 @@ export function makeClient(): SupabaseClient {
 // Advancing by page.length is correct whatever the cap is, and is identical to
 // the old behaviour when there is no cap. The cost is one extra request per
 // table: the one that comes back empty.
+//
+// The builder callback is typed structurally, not as supabase-js's
+// PostgrestFilterBuilder. That type is generic over a generated Database schema
+// and this repository has none: the exporters name their tables and columns as
+// plain strings. So the shape below is exactly the filter surface the exporters
+// use today, and every method returns the query so the calls chain. A filter
+// that is not listed here is a compile error rather than a silent any, which is
+// the right failure: add the one line when a caller needs it.
+export type FilterQuery = {
+  eq(column: string, value: unknown): FilterQuery;
+  is(column: string, value: unknown): FilterQuery;
+};
+
 const PAGE = 1000;
 
 export async function fetchAllRows<T>(
@@ -106,7 +142,7 @@ export async function fetchAllRows<T>(
   table: string,
   orderColumn: string,
   uniqueColumn: string,
-  build: (q: ReturnType<SupabaseClient["from"]>) => unknown,
+  build: (q: FilterQuery) => unknown,
 ): Promise<T[]> {
   if (!uniqueColumn || uniqueColumn.trim() === "") {
     throw new Error(

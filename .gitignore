@@ -11,8 +11,14 @@ lerna-debug.log*
 node_modules
 node_modules/
 
-# npm lockfile - the project uses Bun. package-lock.json would go stale,
-# bun.lockb is the single source of truth.
+# npm lockfile - the project uses Bun, so package-lock.json would go stale.
+#
+# Note what this does NOT say. No Bun lockfile is committed either: bun.lock
+# and bun.lockb are absent at the repository root and at sites/world, and
+# neither is listed here, so they were never committed rather than excluded.
+# Until one is committed, every install resolves the version ranges in
+# package.json fresh, and two builds of the same commit can install different
+# dependency versions. Do not read the line below as evidence of a pin.
 package-lock.json
 
 # Build outputs
