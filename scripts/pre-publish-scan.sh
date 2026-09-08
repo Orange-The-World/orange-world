@@ -134,7 +134,17 @@ scan() {
   local count
   count=$(printf '%s\n' "$filtered" | wc -l)
   printf "  \033[31mFAIL\033[0m  %s (%d findings)\n" "$name" "$count"
-  printf '%s\n' "$filtered" | sed 's/^/      /' | head -20
+  # In CI the output goes to a PUBLIC Actions log, so never echo matched
+  # CONTENT there: a brand, infra or PII hit would publish the exact
+  # internal string this scan exists to keep out of the public tree. Emit
+  # file:line only (the category is already named on the line above), which
+  # is enough to locate and clean up. Locally, emit the full matched line so
+  # a developer can see exactly what matched.
+  if [[ -n "${CI:-}" || -n "${GITHUB_ACTIONS:-}" ]]; then
+    printf '%s\n' "$filtered" | sed -E 's/^([^:]+:[0-9]+):.*/\1/' | sed 's/^/      /' | head -20
+  else
+    printf '%s\n' "$filtered" | sed 's/^/      /' | head -20
+  fi
   if [[ "$count" -gt 20 ]]; then
     printf "      ... %d more\n" "$((count - 20))"
   fi
