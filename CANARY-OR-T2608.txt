@@ -1,0 +1,7 @@
+Throwaway canary for OR-T2608 pre-publish-scan.sh redaction-gate verification.
+
+This file exists only to trip the "Dead PR references" scan category with a
+non-sensitive, matchable string: PR #999
+
+This branch and PR will be closed unmerged once the CI leak-scan log has
+been captured as evidence on OR-T2608.
