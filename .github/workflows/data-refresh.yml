@@ -69,6 +69,13 @@ jobs:
         env:
           ORANGE_WORLD_PROD_URL: ${{ secrets.ORANGE_WORLD_PROD_URL }}
           ORANGE_WORLD_PROD_SERVICE_KEY: ${{ secrets.ORANGE_WORLD_PROD_SERVICE_KEY }}
+          # The btc-fiat series is read from a second project. The exporter takes
+          # these two names from the process environment, and a repository
+          # secret is invisible to a step until the workflow maps it here.
+          # Without this mapping the exporter takes its credentials-absent
+          # branch even when both secrets exist.
+          ORBI_PROD_URL: ${{ secrets.ORBI_PROD_URL }}
+          ORBI_PROD_SERVICE_KEY: ${{ secrets.ORBI_PROD_SERVICE_KEY }}
         run: |
           set -o pipefail
           bun run export:data 2>&1 | tee /tmp/export.log
@@ -162,16 +169,22 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ORANGE_WORLD_PROD_URL: ${{ secrets.ORANGE_WORLD_PROD_URL }}
           ORANGE_WORLD_PROD_SERVICE_KEY: ${{ secrets.ORANGE_WORLD_PROD_SERVICE_KEY }}
+          ORBI_PROD_URL: ${{ secrets.ORBI_PROD_URL }}
+          ORBI_PROD_SERVICE_KEY: ${{ secrets.ORBI_PROD_SERVICE_KEY }}
         run: |
           set -euo pipefail
 
           redact() {
             local url="${ORANGE_WORLD_PROD_URL:-}"
             local key="${ORANGE_WORLD_PROD_SERVICE_KEY:-}"
+            local orbi_url="${ORBI_PROD_URL:-}"
+            local orbi_key="${ORBI_PROD_SERVICE_KEY:-}"
             local line
             while IFS= read -r line || [ -n "$line" ]; do
               if [ -n "$url" ]; then line="${line//"$url"/[redacted project url]}"; fi
               if [ -n "$key" ]; then line="${line//"$key"/[redacted service key]}"; fi
+              if [ -n "$orbi_url" ]; then line="${line//"$orbi_url"/[redacted orbi project url]}"; fi
+              if [ -n "$orbi_key" ]; then line="${line//"$orbi_key"/[redacted orbi key]}"; fi
               printf '%s\n' "$line"
             done | sed -E \
               -e 's#https?://[A-Za-z0-9._-]*supabase[A-Za-z0-9._-]*#[redacted host]#g' \
