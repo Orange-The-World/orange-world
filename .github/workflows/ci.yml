@@ -53,7 +53,16 @@ jobs:
         # file. Frozen means a lockfile that disagrees with package.json fails
         # here, at the first install, instead of being repaired where nobody
         # can see it.
-        run: bun install --frozen-lockfile
+        run: |
+          set -o pipefail
+          rc=0
+          bun install --frozen-lockfile 2>&1 | tee install.log || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            head -10 install.log | while IFS= read -r line; do
+              echo "::error::bun install --frozen-lockfile: $line"
+            done
+          fi
+          exit "$rc"
 
       - name: Guard logic unit tests
         # Pure fixtures, no database, no credentials: guard.ts, lib/age.ts and
