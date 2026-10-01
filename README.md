@@ -2,7 +2,7 @@
 
 # Orange the World
 
-### Free, CC-BY 4.0 truth tables on money, prices, and the cost of living.
+### Free, CC-BY 4.0 truth tables on money, prices, and the cost of living. 
 
 
 [![License: Apache 2.0 (code)](https://img.shields.io/badge/License-Apache%202.0-F7931A.svg)](./LICENSE)
