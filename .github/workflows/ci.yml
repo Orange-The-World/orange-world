@@ -50,9 +50,9 @@ jobs:
         # job. A plain `bun install` here would re-resolve and silently
         # rewrite an out-of-date bun.lock inside the CI workspace, and the
         # frozen install further down would then pass against the rewritten
-        # file. Frozen means a lockfile that disagrees with package.json fails
-        # here, at the first install, instead of being repaired where nobody
-        # can see it.
+        # file. With --frozen-lockfile, a bun.lock that is missing a
+        # dependency that package.json declares fails here, at the first
+        # install, instead of being repaired where nobody can see it.
         run: bun install --frozen-lockfile
 
       - name: Guard logic unit tests
@@ -89,7 +89,8 @@ jobs:
       # Frozen. bun.lock at the repository root is the pin for the whole
       # workspace: sites/world is a workspace member, so there is one lockfile
       # and not one per directory. With --frozen-lockfile an install fails when
-      # package.json and bun.lock disagree, instead of resolving ranges fresh
+      # bun.lock would have to change, for example when package.json declares
+      # a dependency that bun.lock does not list, instead of resolving fresh
       # and rewriting the lockfile inside the CI workspace, so two builds of
       # the same commit install the same dependency versions. To change a
       # dependency, regenerate bun.lock with the Bun version pinned in this
