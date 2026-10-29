@@ -45,7 +45,15 @@ jobs:
         # command after this same install, which is why the identical tests
         # passed there and failed here. If you remove this, read that job
         # first.
-        run: bun install
+        #
+        # Frozen, and it has to stay frozen. This is the first install in the
+        # job. A plain `bun install` here would re-resolve and silently
+        # rewrite an out-of-date bun.lock inside the CI workspace, and the
+        # frozen install further down would then pass against the rewritten
+        # file. With --frozen-lockfile, a bun.lock that is missing a
+        # dependency that package.json declares fails here, at the first
+        # install, instead of being repaired where nobody can see it.
+        run: bun install --frozen-lockfile
 
       - name: Guard logic unit tests
         # Pure fixtures, no database, no credentials: guard.ts, lib/age.ts and
@@ -78,16 +86,18 @@ jobs:
           # tests until the toolchain underneath them stops moving.
           bun-version: 1.4.0
 
-      # Deliberately NOT --frozen-lockfile (OR-T1525). This repository has no
-      # committed lockfile: bun.lock and bun.lockb are absent at the root and
-      # at sites/world, and .gitignore does not exclude either of them. The
-      # flag would therefore enforce nothing -- the lint job above already
-      # passes with it against that same empty state -- and a flag that cannot
-      # fail is worse than no flag, because it reads as a guarantee. Committing
-      # a lockfile is a larger change than this PR is scoped for and is tracked
-      # separately.
+      # Frozen. bun.lock at the repository root is the pin for the whole
+      # workspace: sites/world is a workspace member, so there is one lockfile
+      # and not one per directory. With --frozen-lockfile an install fails when
+      # bun.lock would have to change, for example when package.json declares
+      # a dependency that bun.lock does not list, instead of resolving fresh
+      # and rewriting the lockfile inside the CI workspace, so two builds of
+      # the same commit install the same dependency versions. To change a
+      # dependency, regenerate bun.lock with the Bun version pinned in this
+      # file (the Refresh lockfile workflow does that on CI) and commit it
+      # alongside the package.json change.
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       # scripts/export holds the two guards that stand between the database and
       # a published CC-BY dataset: the coverage guard and the byte-for-byte
@@ -109,8 +119,10 @@ jobs:
         with:
           bun-version: 1.4.0
 
+      # Frozen, as in the jobs above: an install that cannot be reproduced from
+      # bun.lock must fail rather than resolve fresh.
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       # fetchAllRows in scripts/export/lib/client.ts takes a required unique
       # tiebreaker column, because paging on a non-unique sort key can return

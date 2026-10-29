@@ -37,14 +37,14 @@ FAIL=0
 echo "== ${PROJECT} (declared branch: ${BRANCH}) =="
 
 RESPONSE=$(curl -sS --fail-with-body \
-  "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${PROJECT}/deployments?per_page=100" \
+  "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${PROJECT}/deployments?per_page=25" \
   -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
 
 LATEST=$(echo "$RESPONSE" | jq -c --arg b "$BRANCH" \
   '[.result[] | select(.deployment_trigger.metadata.branch == $b)] | sort_by(.created_on) | last')
 
 if [ "$LATEST" = "null" ] || [ -z "$LATEST" ]; then
-  echo "::error::${PROJECT}: no deployment found for branch '${BRANCH}' in the most recent 100. UNKNOWN, not reported as healthy. Widen the page size or confirm the branch name."
+  echo "::error::${PROJECT}: no deployment found for branch '${BRANCH}' in the most recent 25. UNKNOWN, not reported as healthy. Widen the page size or confirm the branch name."
   exit 1
 fi
 

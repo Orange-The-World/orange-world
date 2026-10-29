@@ -1,12 +1,13 @@
 name: Refresh lockfile
 
-# Why this exists (OR-T1734). ci.yml's lint-and-build job runs
-# `bun install --frozen-lockfile` and is green on dev, while no lockfile is
-# committed anywhere in this repository. A frozen install with nothing to
-# freeze against enforces nothing: it reads as a dependency pin that does not
-# exist. This is a public repository publishing a data site and the runtime
-# dependency @supabase/supabase-js is a caret range, so two builds of the same
-# commit can install different versions today.
+# Why this exists. The dependency pin for this repository is bun.lock at the
+# repository root (sites/world is a workspace member, so there is one lockfile
+# and not one per directory), and ci.yml installs with --frozen-lockfile
+# against it. This is a public repository publishing a data site and the
+# runtime dependency @supabase/supabase-js is a caret range, so without a
+# committed lockfile two builds of the same commit can install different
+# versions. When the lockfile has to change, this workflow regenerates it with
+# the Bun build CI runs.
 #
 # A lockfile cannot be hand written; it is whatever `bun install` produces. So
 # the generating machine has to be one that runs bun, and that is CI. This
